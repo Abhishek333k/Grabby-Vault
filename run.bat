@@ -1,6 +1,16 @@
 @echo off
-echo Starting GrabbyVault...
-call .venv\Scripts\activate.bat
-python -m playwright install chromium
+setlocal
+cd /d "%~dp0"
+
+if exist ".venv\Scripts\activate.bat" (
+  call ".venv\Scripts\activate.bat"
+) else if exist "venv\Scripts\activate.bat" (
+  call "venv\Scripts\activate.bat"
+) else (
+  echo No virtualenv found. Create one: python -m venv venv
+  pause
+  exit /b 1
+)
+
 python src\main.py
-pause
+if errorlevel 1 pause

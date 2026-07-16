@@ -1,36 +1,45 @@
 import customtkinter as ctk
+import os
 import sys
+
+# Ensure src/ is on path when launched as python src/main.py
+_SRC = os.path.dirname(os.path.abspath(__file__))
+if _SRC not in sys.path:
+    sys.path.insert(0, _SRC)
+
+from core.logging_setup import setup_logging
+from core.paths import app_root
 from ui.main_window import MainWindow
 from ui.tray import SystemTrayIcon
 
+
 def main():
-    # Instantiate the custom MainWindow
+    setup_logging()
+    # Stable CWD so relative assets / accidental relpaths resolve
+    try:
+        os.chdir(app_root())
+    except OSError:
+        pass
+
     app = MainWindow()
-    
-    # Initialize references to ensure clean shutdown coordination
     tray = None
-    
+
     def on_app_quit():
         print("[App] Cleaning up and exiting...")
         if tray:
             tray.stop()
         app.destroy()
         sys.exit(0)
-        
+
     def on_window_close():
-        # Minimize (hide) the window to system tray instead of destroying it
-        print("[App] Hiding window to system tray. Access GrabbyVault from the taskbar tray.")
+        print("[App] Hiding window to system tray.")
         app.withdraw()
 
-    # Configure window close callback
     app.on_close_callback = on_window_close
-    
-    # Initialize and launch system tray
     tray = SystemTrayIcon(app, on_quit_callback=on_app_quit)
     tray.run()
-    
-    # Start the Tkinter main loop (blocks until app.destroy is called)
     app.mainloop()
+
 
 if __name__ == "__main__":
     main()

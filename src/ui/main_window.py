@@ -7,7 +7,15 @@ from core.queue_manager import QueueManager
 from core.url_router import URLRouter
 from core.config_manager import ConfigManager
 from core.downloader import Downloader
-from ui.dialogs import PlaylistSelectionDialog, FormatSelectionDialog, SettingsDialog
+from ui.dialogs import (
+    PlaylistSelectionDialog,
+    FormatSelectionDialog,
+    SettingsDialog,
+    LicenseDialog,
+    DonateDialog,
+    AboutDialog,
+)
+from core.license_manager import LicenseManager
 from ui.themes import (
     DEEP_DARK, CARD_BG, INPUT_BG, BORDER_MUTED, TEXT_PRIMARY, TEXT_MUTED,
     NEON_BLUE, NEON_PURPLE, NEON_GREEN, NEON_RED, apply_cyberpunk_theme
@@ -70,9 +78,12 @@ class MainWindow(ctk.CTk):
         # Callback for when app closing is requested (will minimize to system tray)
         self.on_close_callback = None
         
+        self.license = LicenseManager()
+
         # Create all layout components
         self._create_layout()
-        
+        self.refresh_license_ui()
+
         # Load persistent jobs into UI
         self.after(100, self._load_persistent_jobs)
 
@@ -129,7 +140,19 @@ class MainWindow(ctk.CTk):
             font=("Segoe UI", 16, "bold"), 
             text_color=NEON_BLUE
         )
-        self.title_label.pack(side="left", padx=15)
+        self.title_label.pack(side="left", padx=(15, 6))
+
+        self.tier_badge = ctk.CTkLabel(
+            self.title_bar,
+            text="FREE",
+            font=("Segoe UI", 11, "bold"),
+            text_color=TEXT_MUTED,
+            fg_color="#1a1a22",
+            corner_radius=4,
+            width=48,
+            height=22,
+        )
+        self.tier_badge.pack(side="left", padx=(0, 8))
         
         # Bind dragging
         self.title_bar.bind("<ButtonPress-1>", self._start_drag)
@@ -149,9 +172,26 @@ class MainWindow(ctk.CTk):
         self.btn_min = ctk.CTkButton(self.title_bar, text="—", text_color=TEXT_PRIMARY, font=("Segoe UI", 14), command=self._minimize, **btn_opts)
         self.btn_min.pack(side="right", padx=2, pady=7)
         
-        # Settings Button
+        # Settings / Pro / Donate
         self.btn_settings = ctk.CTkButton(self.title_bar, text="⚙", text_color=TEXT_PRIMARY, font=("Segoe UI", 14), command=self._open_settings, **btn_opts)
-        self.btn_settings.pack(side="right", padx=15, pady=7)
+        self.btn_settings.pack(side="right", padx=(4, 10), pady=7)
+
+        self.btn_about = ctk.CTkButton(self.title_bar, text="ⓘ", text_color=TEXT_PRIMARY, font=("Segoe UI", 14), command=self._open_about, **btn_opts)
+        self.btn_about.pack(side="right", padx=2, pady=7)
+
+        self.btn_donate = ctk.CTkButton(
+            self.title_bar, text="♥", text_color=NEON_GREEN, font=("Segoe UI", 14),
+            command=self._open_donate, **btn_opts
+        )
+        self.btn_donate.pack(side="right", padx=2, pady=7)
+
+        self.btn_pro = ctk.CTkButton(
+            self.title_bar, text="Pro", width=44, height=28,
+            fg_color=NEON_PURPLE, text_color=TEXT_PRIMARY, hover_color="#7a00cc",
+            font=("Segoe UI", 12, "bold"), corner_radius=6,
+            command=self._open_license,
+        )
+        self.btn_pro.pack(side="right", padx=6, pady=7)
         
         # 2. Main Content Frame
         self.content_frame = ctk.CTkFrame(self, fg_color="transparent")
@@ -549,6 +589,31 @@ class MainWindow(ctk.CTk):
     def _open_settings(self):
         SettingsDialog(self, self.queue_manager)
 
+    def _open_license(self):
+        LicenseDialog(self)
+
+    def _open_donate(self):
+        DonateDialog(self)
+
+    def _open_about(self):
+        AboutDialog(self)
+
+    def refresh_license_ui(self):
+        """Update FREE/PRO badge after activation."""
+        self.license = LicenseManager()
+        if not hasattr(self, "tier_badge"):
+            return
+        if self.license.is_pro:
+            self.tier_badge.configure(text="PRO", text_color=NEON_GREEN)
+            self.btn_pro.configure(text="Pro ✓", fg_color="#1a3d2a")
+        else:
+            self.tier_badge.configure(text="FREE", text_color=TEXT_MUTED)
+            self.btn_pro.configure(text="Pro", fg_color=NEON_PURPLE)
+        # Status bar plan hint
+        if hasattr(self, "status_left"):
+            plan = self.license.tier_label()
+            self.status_left.configure(text=f"SYSTEM READY · {plan}")
+
     def _filter_queue(self, *args):
         query = self.search_var.get().lower()
         for job_id, card_data in self.queue_cards.items():
@@ -667,21 +732,29 @@ class MainWindow(ctk.CTk):
                                         job_id = str(uuid.uuid4())
                                         thumb = entry.get('thumbnail', '')
                                         
-                                        # Use standard format if not playwright, else just best
-                                        final_fmt = 'best' if is_playwright else fmt_str
+                                        # Always use the chosen quality preset (even for Playwright
+                                        # direct streams / m3u8). Old code forced 'best', which often
+                                        # grabbed the lowest HLS rung → pixelated / silent files.
+                                        final_fmt = fmt_str
                                         
                                         entry['id'] = job_id
                                         # Inject playlist_title for folder grouping
                                         entry['playlist_title'] = playlist_title
                                         
                                         self._add_queue_item(job_id, f"{title} [{entry.get('ext', 'unknown')}]", platform, thumbnail_url=thumb)
-                                        self.queue_manager.add_job(entry_url, entry, priority=pri, format_str=final_fmt, platform=platform)
+                                        _jid, warning = self.queue_manager.add_job(
+                                            entry_url, entry, priority=pri,
+                                            format_str=final_fmt, platform=platform,
+                                        )
+                                        if warning:
+                                            self.status_left.configure(text=warning[:80])
                                         
-                                if is_playwright:
-                                    # Skip format dialog for direct streams
-                                    queue_selected('best')
-                                else:
-                                    FormatSelectionDialog(self, title=f"Format for Playlist ({len(selected_entries)} items)", on_submit=queue_selected)
+                                # Always ask quality — applies to Playwright streams too
+                                FormatSelectionDialog(
+                                    self,
+                                    title=f"Format for Playlist ({len(selected_entries)} items)",
+                                    on_submit=queue_selected,
+                                )
                                 
                             dialog_title = "Select Alternative Streams" if is_playwright else "Select Videos"
                             PlaylistSelectionDialog(self, entries, on_submit=on_playlist_submit)
@@ -694,7 +767,12 @@ class MainWindow(ctk.CTk):
                                 
                                 meta = data.copy()
                                 meta['id'] = job_id
-                                self.queue_manager.add_job(url, meta, priority=pri, format_str=fmt_str, platform=platform)
+                                _jid, warning = self.queue_manager.add_job(
+                                    url, meta, priority=pri,
+                                    format_str=fmt_str, platform=platform,
+                                )
+                                if warning:
+                                    self.status_left.configure(text=warning[:80])
                             FormatSelectionDialog(self, title="Format for Video", on_submit=on_format_submit)
                     else:
                         print(f"[UI] Failed to fetch info: {data}")

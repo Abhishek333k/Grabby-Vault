@@ -1,4 +1,13 @@
 {
     "download_path": "O:\\Projects\\GitHub Repos\\GrabbyVault\\downloads",
-    "max_concurrent_downloads": 5
+    "max_concurrent_downloads": 2,
+    "default_quality": "1080",
+    "license_key": "GV-PRO-DEV-UNLOCK",
+    "pro_unlocked": true,
+    "lemonsqueezy_checkout_url": "https://grabbyvault.lemonsqueezy.com/buy/pro",
+    "lemonsqueezy_donate_url": "https://grabbyvault.lemonsqueezy.com/buy/donate",
+    "donate_url": "",
+    "open_folder_on_complete": false,
+    "write_subtitles": true,
+    "embed_thumbnail": true
 }
