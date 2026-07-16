@@ -425,7 +425,7 @@ class LicenseDialog(ctk.CTkToplevel):
     def __init__(self, master):
         super().__init__(master)
         self.title("License — GrabbyVault Pro")
-        self.geometry("460x360")
+        self.geometry("480x420")
         self.resizable(False, False)
         self.transient(master)
         self.grab_set()
@@ -448,37 +448,43 @@ class LicenseDialog(ctk.CTkToplevel):
 
         ctk.CTkLabel(
             self,
-            text="Pro unlocks: 1080p/4K/Best · up to 5 concurrent downloads",
+            text="Pro: 1080p/4K/Best · up to 5 concurrent · Lemon Squeezy key",
             font=("Segoe UI", 11),
             text_color=TEXT_MUTED,
-        ).pack(pady=(0, 10))
+        ).pack(pady=(0, 8))
 
         ctk.CTkLabel(
-            self, text="License key:", font=("Segoe UI", 12), text_color=TEXT_PRIMARY
+            self, text="License key (from your purchase email):", font=("Segoe UI", 12), text_color=TEXT_PRIMARY
         ).pack(anchor="w", padx=30)
         self.key_var = ctk.StringVar(value=self.license.license_key)
         ctk.CTkEntry(
             self,
             textvariable=self.key_var,
-            width=380,
+            width=400,
             fg_color=INPUT_BG,
             border_color=BORDER_MUTED,
             text_color=TEXT_PRIMARY,
-            placeholder_text="GV-XXXX-XXXX-XXXX or paste from Lemon Squeezy",
+            placeholder_text="Paste Lemon Squeezy license key",
         ).pack(padx=30, pady=6)
 
-        self.msg = ctk.CTkLabel(self, text="", font=("Segoe UI", 11), text_color=TEXT_MUTED)
+        ctk.CTkLabel(
+            self,
+            text=f"This device: {self.license.instance_label()[:48]}…",
+            font=("Segoe UI", 9),
+            text_color=TEXT_MUTED,
+        ).pack(pady=(0, 4))
+
+        self.msg = ctk.CTkLabel(
+            self, text="", font=("Segoe UI", 11), text_color=TEXT_MUTED, wraplength=420
+        )
         self.msg.pack(pady=4)
 
         row = ctk.CTkFrame(self, fg_color="transparent")
-        row.pack(pady=12)
-        ctk.CTkButton(
-            row,
-            text="Activate",
-            width=110,
-            fg_color=NEON_BLUE,
-            command=self._activate,
-        ).pack(side="left", padx=6)
+        row.pack(pady=10)
+        self.btn_act = ctk.CTkButton(
+            row, text="Activate", width=110, fg_color=NEON_BLUE, command=self._activate
+        )
+        self.btn_act.pack(side="left", padx=6)
         ctk.CTkButton(
             row,
             text="Buy Pro",
@@ -488,8 +494,18 @@ class LicenseDialog(ctk.CTkToplevel):
         ).pack(side="left", padx=6)
         ctk.CTkButton(
             row,
+            text="Deactivate",
+            width=100,
+            fg_color="transparent",
+            border_width=1,
+            border_color=BORDER_MUTED,
+            text_color=TEXT_MUTED,
+            command=self._deactivate,
+        ).pack(side="left", padx=6)
+        ctk.CTkButton(
+            row,
             text="Close",
-            width=90,
+            width=80,
             fg_color="transparent",
             border_width=1,
             border_color=BORDER_MUTED,
@@ -497,28 +513,60 @@ class LicenseDialog(ctk.CTkToplevel):
             command=self.destroy,
         ).pack(side="left", padx=6)
 
-        ctk.CTkLabel(
-            self,
-            text="Dev test key: GV-PRO-DEV-UNLOCK",
-            font=("Segoe UI", 10),
-            text_color=TEXT_MUTED,
-        ).pack(pady=(8, 0))
+        if self.license.allow_dev_keys:
+            ctk.CTkLabel(
+                self,
+                text="Dev: GV-PRO-DEV-UNLOCK  ·  set allow_dev_keys=false for release",
+                font=("Segoe UI", 10),
+                text_color=TEXT_MUTED,
+            ).pack(pady=(10, 0))
 
     def _activate(self):
-        ok, message = self.license.activate(self.key_var.get())
+        import threading
+
+        self.btn_act.configure(state="disabled", text="…")
+        self.msg.configure(text="Contacting Lemon Squeezy…", text_color=TEXT_MUTED)
+
+        def work():
+            ok, message = self.license.activate(self.key_var.get())
+            self.after(0, lambda: self._done(ok, message))
+
+        threading.Thread(target=work, daemon=True).start()
+
+    def _done(self, ok, message):
+        self.btn_act.configure(state="normal", text="Activate")
         self.msg.configure(text=message, text_color=NEON_GREEN if ok else NEON_RED)
         if ok:
             self.lbl_status.configure(text="Current plan: PRO ✓", text_color=NEON_GREEN)
-            # Refresh main window badge if present
             if hasattr(self.master, "refresh_license_ui"):
                 self.master.refresh_license_ui()
+
+    def _deactivate(self):
+        import threading
+
+        def work():
+            ok, message = self.license.deactivate_online()
+
+            def ui():
+                self.msg.configure(
+                    text=message, text_color=NEON_GREEN if ok else NEON_RED
+                )
+                self.lbl_status.configure(
+                    text="Current plan: FREE", text_color=TEXT_MUTED
+                )
+                if hasattr(self.master, "refresh_license_ui"):
+                    self.master.refresh_license_ui()
+
+            self.after(0, ui)
+
+        threading.Thread(target=work, daemon=True).start()
 
 
 class DonateDialog(ctk.CTkToplevel):
     def __init__(self, master):
         super().__init__(master)
-        self.title("Donate")
-        self.geometry("420x280")
+        self.title("Donate — SilenVault")
+        self.geometry("460x360")
         self.resizable(False, False)
         self.transient(master)
         self.grab_set()
@@ -527,29 +575,31 @@ class DonateDialog(ctk.CTkToplevel):
 
         ctk.CTkLabel(
             self,
-            text="Support GrabbyVault",
+            text="Support SilenVault",
             font=("Segoe UI", 16, "bold"),
             text_color=NEON_GREEN,
-        ).pack(pady=(24, 10))
+        ).pack(pady=(22, 8))
 
         ctk.CTkLabel(
             self,
             text=(
-                "No ads. Ever.\n\n"
-                "If GrabbyVault helps you, an optional donation keeps\n"
-                "development going. 100% voluntary — no features locked."
+                "GrabbyVault has no ads and no tracking upsells.\n\n"
+                "A donation is optional. It does not unlock Pro features.\n"
+                "Pro is a separate license. Tips go to keeping SilenVault alive\n"
+                "(store, tools, and this app).\n\n"
+                "Suggested: whatever feels fair — $3, $5, or more."
             ),
             font=("Segoe UI", 12),
             text_color=TEXT_PRIMARY,
             justify="center",
-        ).pack(padx=24, pady=8)
+        ).pack(padx=28, pady=6)
 
         row = ctk.CTkFrame(self, fg_color="transparent")
-        row.pack(pady=18)
+        row.pack(pady=16)
         ctk.CTkButton(
             row,
-            text="Donate",
-            width=120,
+            text="Open donate page",
+            width=150,
             height=36,
             fg_color=NEON_GREEN,
             text_color="#0a0a0c",
@@ -558,8 +608,19 @@ class DonateDialog(ctk.CTkToplevel):
         ).pack(side="left", padx=8)
         ctk.CTkButton(
             row,
+            text="Visit store",
+            width=120,
+            height=36,
+            fg_color="transparent",
+            border_width=1,
+            border_color=NEON_BLUE,
+            text_color=NEON_BLUE,
+            command=lambda: webbrowser.open(self.license.store_url()),
+        ).pack(side="left", padx=8)
+        ctk.CTkButton(
+            row,
             text="Close",
-            width=100,
+            width=90,
             height=36,
             fg_color="transparent",
             border_width=1,
@@ -568,38 +629,148 @@ class DonateDialog(ctk.CTkToplevel):
             command=self.destroy,
         ).pack(side="left", padx=8)
 
+        ctk.CTkLabel(
+            self,
+            text="store.silenvault.com/sponsor  ·  or your Lemon Squeezy tip product",
+            font=("Segoe UI", 10),
+            text_color=TEXT_MUTED,
+        ).pack(pady=(4, 0))
+
 
 class AboutDialog(ctk.CTkToplevel):
+    """About + Developer tabs."""
+
     def __init__(self, master):
         super().__init__(master)
         self.title("About GrabbyVault")
-        self.geometry("420x300")
+        self.geometry("520x480")
         self.resizable(False, False)
         self.transient(master)
         self.grab_set()
         self.configure(fg_color=DEEP_DARK)
-        lic = LicenseManager()
+        self.lic = LicenseManager()
 
         ctk.CTkLabel(
             self, text="GrabbyVault", font=("Segoe UI", 18, "bold"), text_color=NEON_BLUE
-        ).pack(pady=(24, 4))
+        ).pack(pady=(16, 2))
         ctk.CTkLabel(
             self,
-            text=f"Desktop video downloader · {lic.tier_label()}",
+            text=f"by SilenVault  ·  {self.lic.tier_label()}",
             font=("Segoe UI", 12),
-            text_color=TEXT_MUTED,
+            text_color=NEON_PURPLE,
         ).pack()
-        ctk.CTkLabel(
+
+        self.tabs = ctk.CTkTabview(
             self,
-            text=(
-                "Powered by yt-dlp + ffmpeg\n"
-                "Sold via Lemon Squeezy · no ads\n\n"
-                f"Data folder:\n{app_root()}"
-            ),
-            font=("Segoe UI", 11),
+            width=480,
+            height=340,
+            fg_color=CARD_BG,
+            segmented_button_selected_color=NEON_BLUE,
+            segmented_button_selected_hover_color="#0099bb",
+            segmented_button_unselected_color=INPUT_BG,
             text_color=TEXT_PRIMARY,
-            justify="center",
-        ).pack(pady=16)
+        )
+        self.tabs.pack(padx=16, pady=12, fill="both", expand=True)
+        self.tabs.add("About")
+        self.tabs.add("Developer")
+        self.tabs.add("Credits")
+
+        # --- About ---
+        about = self.tabs.tab("About")
+        ctk.CTkLabel(
+            about,
+            text=(
+                "Windows desktop downloader for personal offline use.\n"
+                "Paste a link → pick quality → save to your folder.\n\n"
+                "Free: 720p · 1 download at a time\n"
+                "Pro: higher quality · multi-queue · no ads ever\n\n"
+                "Only download content you have the right to access."
+            ),
+            font=("Segoe UI", 12),
+            text_color=TEXT_PRIMARY,
+            justify="left",
+            wraplength=440,
+        ).pack(anchor="w", padx=12, pady=12)
+
+        brow = ctk.CTkFrame(about, fg_color="transparent")
+        brow.pack(fill="x", padx=12, pady=4)
+        ctk.CTkButton(
+            brow, text="Store", width=100, command=lambda: webbrowser.open(self.lic.store_url())
+        ).pack(side="left", padx=4)
+        ctk.CTkButton(
+            brow, text="Buy Pro", width=100, fg_color=NEON_PURPLE,
+            command=lambda: webbrowser.open(self.lic.checkout_url()),
+        ).pack(side="left", padx=4)
+        ctk.CTkButton(
+            brow, text="Donate", width=100, fg_color="transparent",
+            border_width=1, border_color=NEON_GREEN, text_color=NEON_GREEN,
+            command=lambda: webbrowser.open(self.lic.donate_url()),
+        ).pack(side="left", padx=4)
+
+        # --- Developer ---
+        dev = self.tabs.tab("Developer")
+        ctk.CTkLabel(
+            dev,
+            text="SilenVault",
+            font=("Segoe UI", 14, "bold"),
+            text_color=NEON_BLUE,
+        ).pack(anchor="w", padx=12, pady=(12, 4))
+        ctk.CTkLabel(
+            dev,
+            text=(
+                "Indie studio building desktop tools and digital assets.\n"
+                "Store: store.silenvault.com\n\n"
+                f"Support: {self.lic.support_email()}\n"
+                "Licensing: Lemon Squeezy (activate online once per device seat).\n\n"
+                "Bug reports: use email with logs from Settings → Open Logs.\n"
+                "Do not send license keys in public issues."
+            ),
+            font=("Segoe UI", 12),
+            text_color=TEXT_PRIMARY,
+            justify="left",
+            wraplength=440,
+        ).pack(anchor="w", padx=12, pady=4)
+
+        drow = ctk.CTkFrame(dev, fg_color="transparent")
+        drow.pack(fill="x", padx=12, pady=10)
+        ctk.CTkButton(
+            drow, text="Developer page", width=130,
+            command=lambda: webbrowser.open(self.lic.developer_url()),
+        ).pack(side="left", padx=4)
+        ctk.CTkButton(
+            drow, text="Open data folder", width=130,
+            command=lambda: os.startfile(app_root()),
+        ).pack(side="left", padx=4)
+
+        ctk.CTkLabel(
+            dev,
+            text=f"Install path:\n{app_root()}",
+            font=("Segoe UI", 10),
+            text_color=TEXT_MUTED,
+            justify="left",
+            wraplength=440,
+        ).pack(anchor="w", padx=12, pady=6)
+
+        # --- Credits ---
+        cred = self.tabs.tab("Credits")
+        ctk.CTkLabel(
+            cred,
+            text=(
+                "Core download engine: yt-dlp (open source)\n"
+                "Media tooling: FFmpeg\n"
+                "UI: CustomTkinter\n"
+                "Browser fallback: Playwright\n"
+                "Payments & license keys: Lemon Squeezy\n"
+                "Brand & store: SilenVault\n\n"
+                "Third-party tools are used under their respective licenses.\n"
+                "GrabbyVault itself is a commercial SilenVault product."
+            ),
+            font=("Segoe UI", 12),
+            text_color=TEXT_PRIMARY,
+            justify="left",
+            wraplength=440,
+        ).pack(anchor="w", padx=12, pady=16)
+
         ctk.CTkButton(
             self, text="Close", width=100, command=self.destroy, fg_color=NEON_BLUE
-        ).pack(pady=8)
+        ).pack(pady=(0, 12))

@@ -21,13 +21,22 @@ class ConfigManager:
             "max_concurrent_downloads": 2,
             "default_quality": "1080",
             "license_key": "",
-            "pro_unlocked": False,  # dev override; set true only while testing
-            "lemonsqueezy_checkout_url": "https://grabbyvault.lemonsqueezy.com/buy/pro",
-            "lemonsqueezy_donate_url": "https://grabbyvault.lemonsqueezy.com/buy/donate",
+            "license_activated": False,
+            "license_instance_id": "",
+            "license_last_check": 0,
+            "pro_unlocked": False,
+            "allow_dev_keys": True,
+            "lemonsqueezy_checkout_url": "https://store.silenvault.com",
+            "lemonsqueezy_donate_url": "https://store.silenvault.com/sponsor/",
+            "lemonsqueezy_product_ids": [],
+            "store_url": "https://store.silenvault.com",
+            "developer_url": "https://store.silenvault.com/about/",
+            "support_email": "support@silenvault.com",
             "donate_url": "",
             "open_folder_on_complete": False,
             "write_subtitles": True,
             "embed_thumbnail": True,
+            "show_splash": True,
         }
         self.config = self.load_config()
         self._migrate_absolute_dev_paths()
