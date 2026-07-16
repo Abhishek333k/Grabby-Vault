@@ -1,0 +1,58 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+*.egg-info/
+.eggs/
+dist/
+build/
+*.egg
+
+# Virtual environments
+venv/
+.venv/
+env/
+
+# Local runtime data
+downloads/
+logs/
+queue.db
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+
+# Bundled binaries (too large for GitHub; install/fetch separately)
+bin/
+*.exe
+
+# Local config with machine-specific paths (keep example if present)
+# config.json is committed only if portable; absolute local paths ok to exclude:
+# config.json
+
+# IDE / editor
+.idea/
+.vscode/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
+
+# Agent / tooling
+.agents/
+
+# Playwright
+.playwright/
+test-results/
+
+# Scratch / ad-hoc tests (optional keep — leave tracked if useful)
+# scratch_acrylic.py
+# test_dl.py
+
+# Logs and temp
+*.log
+*.part
+*.ytdl
+*.tmp

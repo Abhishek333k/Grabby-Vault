@@ -1,0 +1,8 @@
+customtkinter>=5.2.2
+yt-dlp>=2024.03.10
+Pillow>=10.2.0
+pystray>=0.19.5
+curl-cffi>=0.5.9
+playwright>=1.42.0
+playwright-stealth>=2.0.3
+pywinstyles
