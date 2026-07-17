@@ -20,6 +20,67 @@ from ui.themes import (
 )
 
 
+class BatchUrlsDialog(ctk.CTkToplevel):
+    """Paste many URLs (one per line) and queue them."""
+
+    def __init__(self, master, on_submit=None):
+        super().__init__(master)
+        self.title("Batch URLs")
+        self.geometry("520x420")
+        self.resizable(True, True)
+        self.transient(master)
+        self.grab_set()
+        self.on_submit = on_submit
+        self.configure(fg_color=DEEP_DARK)
+
+        ctk.CTkLabel(
+            self,
+            text="One URL per line (max 50)",
+            font=("Segoe UI", 14, "bold"),
+            text_color=NEON_BLUE,
+        ).pack(pady=(16, 8))
+        self.box = ctk.CTkTextbox(
+            self,
+            width=480,
+            height=280,
+            fg_color=INPUT_BG,
+            text_color=TEXT_PRIMARY,
+            border_color=BORDER_MUTED,
+            border_width=1,
+        )
+        self.box.pack(padx=20, pady=8, fill="both", expand=True)
+        row = ctk.CTkFrame(self, fg_color="transparent")
+        row.pack(pady=12)
+        ctk.CTkButton(
+            row, text="Queue all", width=120, fg_color=NEON_BLUE, command=self._ok
+        ).pack(side="left", padx=8)
+        ctk.CTkButton(
+            row,
+            text="Cancel",
+            width=100,
+            fg_color="transparent",
+            border_width=1,
+            border_color=BORDER_MUTED,
+            text_color=TEXT_PRIMARY,
+            command=self.destroy,
+        ).pack(side="left", padx=8)
+
+    def _ok(self):
+        from core.utils import is_http_url
+
+        raw = self.box.get("1.0", "end")
+        urls = []
+        for line in raw.splitlines():
+            u = line.strip()
+            if is_http_url(u) and u not in urls:
+                urls.append(u)
+            if len(urls) >= 50:
+                break
+        if self.on_submit:
+            self.on_submit(urls)
+        self.destroy()
+
+
 class FormatSelectionDialog(ctk.CTkToplevel):
     def __init__(self, master, title="Select Quality", on_submit=None):
         super().__init__(master)
@@ -228,8 +289,8 @@ class SettingsDialog(ctk.CTkToplevel):
     def __init__(self, master, queue_manager):
         super().__init__(master)
         self.title("Settings")
-        self.geometry("480x620")
-        self.resizable(False, False)
+        self.geometry("500x720")
+        self.resizable(False, True)
 
         self.transient(master)
         self.grab_set()
@@ -328,6 +389,67 @@ class SettingsDialog(ctk.CTkToplevel):
             text_color=TEXT_PRIMARY,
             fg_color=NEON_PURPLE,
         ).pack(anchor="w", pady=2)
+
+        # Speed limit + cookies
+        adv = ctk.CTkFrame(self, fg_color="transparent")
+        adv.pack(fill="x", padx=20, pady=6)
+        ctk.CTkLabel(
+            adv,
+            text="Speed limit (KB/s, 0 = unlimited):",
+            font=("Segoe UI", 12),
+            text_color=TEXT_PRIMARY,
+        ).pack(anchor="w")
+        self.rate_var = ctk.StringVar(
+            value=str(int(self.config.get("rate_limit_kib", 0) or 0))
+        )
+        ctk.CTkEntry(
+            adv,
+            textvariable=self.rate_var,
+            width=120,
+            fg_color=INPUT_BG,
+            border_color=BORDER_MUTED,
+            text_color=TEXT_PRIMARY,
+        ).pack(anchor="w", pady=4)
+
+        ctk.CTkLabel(
+            adv,
+            text="Cookies file (cookies.txt, optional):",
+            font=("Segoe UI", 12),
+            text_color=TEXT_PRIMARY,
+        ).pack(anchor="w", pady=(8, 0))
+        crow = ctk.CTkFrame(adv, fg_color="transparent")
+        crow.pack(fill="x")
+        self.cookies_var = ctk.StringVar(value=self.config.get("cookies_file") or "")
+        ctk.CTkEntry(
+            crow,
+            textvariable=self.cookies_var,
+            width=340,
+            fg_color=INPUT_BG,
+            border_color=BORDER_MUTED,
+            text_color=TEXT_PRIMARY,
+        ).pack(side="left", pady=4)
+        ctk.CTkButton(
+            crow,
+            text="…",
+            width=36,
+            fg_color=NEON_PURPLE,
+            command=self._browse_cookies,
+        ).pack(side="left", padx=8)
+
+        ctk.CTkButton(
+            adv,
+            text="Update yt-dlp (pip)",
+            width=160,
+            fg_color="transparent",
+            border_width=1,
+            border_color=NEON_BLUE,
+            text_color=NEON_BLUE,
+            command=self._update_ytdlp,
+        ).pack(anchor="w", pady=(10, 4))
+        self.ytdlp_msg = ctk.CTkLabel(
+            adv, text="", font=("Segoe UI", 10), text_color=TEXT_MUTED
+        )
+        self.ytdlp_msg.pack(anchor="w")
 
         # Health
         health = Downloader().health_check()
@@ -440,6 +562,52 @@ class SettingsDialog(ctk.CTkToplevel):
         if directory:
             self.path_var.set(directory)
 
+    def _browse_cookies(self):
+        path = ctk.filedialog.askopenfilename(
+            title="Select cookies.txt",
+            filetypes=[("Cookies", "*.txt"), ("All", "*.*")],
+        )
+        if path:
+            self.cookies_var.set(path)
+
+    def _update_ytdlp(self):
+        import subprocess
+        import sys
+        import threading
+
+        self.ytdlp_msg.configure(text="Updating yt-dlp…")
+
+        def work():
+            try:
+                r = subprocess.run(
+                    [
+                        sys.executable,
+                        "-m",
+                        "pip",
+                        "install",
+                        "-U",
+                        "yt-dlp",
+                    ],
+                    capture_output=True,
+                    text=True,
+                    timeout=180,
+                )
+                ok = r.returncode == 0
+                msg = "yt-dlp updated. Restart app to load it." if ok else (
+                    r.stderr or r.stdout or "Update failed"
+                )[:120]
+            except Exception as e:
+                ok = False
+                msg = str(e)[:120]
+            self.after(
+                0,
+                lambda: self.ytdlp_msg.configure(
+                    text=msg, text_color=NEON_GREEN if ok else NEON_RED
+                ),
+            )
+
+        threading.Thread(target=work, daemon=True).start()
+
     def _open_license(self):
         LicenseDialog(self.master)
 
@@ -447,6 +615,10 @@ class SettingsDialog(ctk.CTkToplevel):
         DonateDialog(self.master)
 
     def _save(self):
+        try:
+            rate = int(float(self.rate_var.get() or 0))
+        except ValueError:
+            rate = 0
         self.config.update(
             {
                 "download_path": self.path_var.get(),
@@ -454,6 +626,8 @@ class SettingsDialog(ctk.CTkToplevel):
                 "use_acrylic": bool(self.acrylic_var.get()),
                 "open_folder_on_complete": bool(self.open_done_var.get()),
                 "playwright_headless": bool(self.headless_var.get()),
+                "rate_limit_kib": max(0, rate),
+                "cookies_file": (self.cookies_var.get() or "").strip(),
             }
         )
         self.queue_manager.apply_settings_change()

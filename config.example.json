@@ -28,5 +28,7 @@
     "show_splash": true,
     "use_acrylic": true,
     "playwright_headless": false,
-    "playwright_timeout_seconds": 45
+    "playwright_timeout_seconds": 45,
+    "rate_limit_kib": 0,
+    "cookies_file": ""
 }

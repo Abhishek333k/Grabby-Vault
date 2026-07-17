@@ -88,16 +88,20 @@ Useful settings:
 ## Build a release folder
 
 ```bat
+scripts\smoke_release.bat
 build.bat
 ```
 
 Output: `dist\GrabbyVault\`
 
+Optional installer (Inno Setup 6): compile `installer\grabbyvault.iss` after the build.
+
 Before shipping:
 
 1. Confirm `bin\ffmpeg.exe` and `bin\ffprobe.exe` are present.  
 2. Ship a clean `config.json` based on `config.example.json` (no developer unlocks).  
-3. Smoke-test activate, download, and open-folder on a clean machine.
+3. Smoke-test activate, download, cancel, and open-folder on a clean machine.  
+4. See `docs/RELEASE_CHECKLIST.md`.
 
 ---
 

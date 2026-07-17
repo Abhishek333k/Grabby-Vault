@@ -13,12 +13,19 @@ pip install -r requirements.txt
 pip install pyinstaller
 
 echo.
+echo Ensuring app icon...
+python -c "import sys; sys.path.insert(0,'src'); from core.branding import ensure_app_ico; print(ensure_app_ico() or 'no ico')"
+
+echo.
 echo Building GrabbyVault.exe (one-folder)...
+set ICON_ARG=
+if exist "assets\grabbyvault.ico" set ICON_ARG=--icon assets\grabbyvault.ico
 pyinstaller --noconfirm --clean ^
   --name GrabbyVault ^
   --windowed ^
   --paths src ^
   --add-data "assets;assets" ^
+  %ICON_ARG% ^
   --hidden-import=yt_dlp ^
   --hidden-import=customtkinter ^
   --hidden-import=PIL ^

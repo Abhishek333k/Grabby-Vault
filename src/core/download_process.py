@@ -85,6 +85,21 @@ class ProcessDownloadRunner:
         ]
         if ffmpeg_loc:
             cmd.extend(["--ffmpeg-location", ffmpeg_loc])
+
+        # Optional rate limit / cookies from config
+        try:
+            from core.config_manager import ConfigManager
+
+            cfg = ConfigManager()
+            kib = int(cfg.get("rate_limit_kib", 0) or 0)
+            if kib > 0:
+                cmd.extend(["--limit-rate", f"{kib}K"])
+            cookies = (cfg.get("cookies_file") or "").strip()
+            if cookies and os.path.isfile(cookies):
+                cmd.extend(["--cookies", cookies])
+        except Exception:
+            pass
+
         if http_headers:
             ua = http_headers.get("user-agent") or http_headers.get("User-Agent")
             ref = http_headers.get("referer") or http_headers.get("Referer")

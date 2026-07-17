@@ -1,0 +1,10 @@
+﻿curl_cffi==0.15.0
+customtkinter==6.0.0
+darkdetect==0.8.0
+greenlet==3.5.3
+pillow==12.3.0
+playwright==1.61.0
+playwright-stealth==2.0.3
+pystray==0.19.5
+pywinstyles==1.8
+yt-dlp==2026.7.4

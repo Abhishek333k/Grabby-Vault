@@ -84,6 +84,18 @@ class Downloader:
         if ffmpeg_loc and ffmpeg_loc not in os.environ.get("PATH", ""):
             os.environ["PATH"] = ffmpeg_loc + os.pathsep + os.environ.get("PATH", "")
 
+        # Speed limit: KB/s in config → bytes/s for yt-dlp
+        try:
+            kib = int(self.config.get("rate_limit_kib", 0) or 0)
+        except (TypeError, ValueError):
+            kib = 0
+        if kib > 0:
+            self.ydl_opts["ratelimit"] = kib * 1024
+
+        cookies = (self.config.get("cookies_file") or "").strip()
+        if cookies and os.path.isfile(cookies):
+            self.ydl_opts["cookiefile"] = cookies
+
         js = _detect_js_runtimes()
         if js:
             self.ydl_opts["js_runtimes"] = js

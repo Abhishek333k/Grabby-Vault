@@ -36,6 +36,8 @@ class ConfigManager:
             "use_process_download": True,
             "lemonsqueezy_variant_ids": [],
             "first_run_done": False,
+            "rate_limit_kib": 0,
+            "cookies_file": "",
             "lemonsqueezy_checkout_url": "https://store.silenvault.com",
             "lemonsqueezy_donate_url": "https://store.silenvault.com/sponsor/",
             "lemonsqueezy_product_ids": [],

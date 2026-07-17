@@ -48,9 +48,25 @@ Source: `docs/AUDIT_REPORT.md` priority backlog
 | Scratch scripts | Removed `scratch_acrylic.py`, `test_dl.py` |
 | Cancel/pause | Immediate `runner.kill()` from queue manager |
 
+## Full backlog pass (icons → CI)
+
+| Item | Fix |
+|------|-----|
+| Window / tray icon | `core/branding.py` + `grabbyvault.ico` from crest |
+| Smoke | `scripts/smoke_release.bat` |
+| Unit tests | `tests/test_formats_license.py` |
+| Batch URLs | Batch button + dialog (≤50) |
+| Cookies | Settings → cookies.txt path |
+| Speed limit | Settings → KB/s → yt-dlp ratelimit |
+| yt-dlp update | Settings button → pip install -U |
+| CI | `.github/workflows/ci.yml` |
+| Installer scaffold | `installer/grabbyvault.iss` |
+| Lock pins | `requirements.lock.txt` |
+| Release checklist | `docs/RELEASE_CHECKLIST.md` |
+
 ## Still soft / known limits
 
 - Pause is **stop-and-resume** (not true mid-stream pause)
 - License seat model is not DRM
 - Playwright remains optional/heavy
-- Open items live in `docs/AUDIT_REPORT.md` only
+- Remaining open items: `docs/AUDIT_REPORT.md`

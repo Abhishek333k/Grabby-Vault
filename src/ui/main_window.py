@@ -14,6 +14,7 @@ from ui.dialogs import (
     LicenseDialog,
     DonateDialog,
     AboutDialog,
+    BatchUrlsDialog,
 )
 from core.license_manager import LicenseManager
 from ui.themes import (
@@ -35,7 +36,8 @@ class MainWindow(ctk.CTk):
         self.title("GrabbyVault")
         self.geometry("900x650")
         self.minsize(850, 550)
-        
+        self._apply_window_icon()
+
         # Frameless window
         self.overrideredirect(True)
         
@@ -95,6 +97,32 @@ class MainWindow(ctk.CTk):
         self.after(100, self._load_persistent_jobs)
         # First-run production checks (ffmpeg, config)
         self.after(400, self._first_run_checks)
+
+    def _apply_window_icon(self):
+        """Taskbar / window icon from assets (ICO preferred on Windows)."""
+        try:
+            from core.branding import ensure_app_ico, brand_image_path
+
+            ico = ensure_app_ico()
+            if ico and os.path.isfile(ico):
+                try:
+                    self.iconbitmap(ico)
+                except Exception:
+                    pass
+            # Also set via PhotoImage fallback when iconbitmap fails
+            path = brand_image_path()
+            if path:
+                try:
+                    from PIL import Image, ImageTk
+
+                    img = Image.open(path).convert("RGBA")
+                    img.thumbnail((32, 32), Image.Resampling.LANCZOS)
+                    self._icon_photo = ImageTk.PhotoImage(img)
+                    self.iconphoto(True, self._icon_photo)
+                except Exception:
+                    pass
+        except Exception:
+            pass
 
     def _load_persistent_jobs(self):
         for job_id, job in self.queue_manager.jobs.items():
@@ -332,6 +360,21 @@ class MainWindow(ctk.CTk):
             command=self._handle_paste
         )
         self.btn_paste.grid(row=1, column=2, padx=5, pady=(0, 15))
+
+        self.btn_batch = ctk.CTkButton(
+            url_frame,
+            text="Batch",
+            width=70,
+            height=38,
+            fg_color="transparent",
+            border_width=1,
+            border_color=BORDER_MUTED,
+            text_color=TEXT_MUTED,
+            hover_color="#262626",
+            font=("Segoe UI", 12, "bold"),
+            command=self._handle_batch_urls,
+        )
+        self.btn_batch.grid(row=1, column=3, padx=5, pady=(0, 15))
         
         # Add to Queue Button
         self.btn_add = ctk.CTkButton(
@@ -345,7 +388,7 @@ class MainWindow(ctk.CTk):
             font=("Segoe UI", 12, "bold"),
             command=self._handle_add_to_queue
         )
-        self.btn_add.grid(row=1, column=3, padx=(5, 15), pady=(0, 15))
+        self.btn_add.grid(row=1, column=4, padx=(5, 15), pady=(0, 15))
 
     def _build_queue_section(self):
         queue_container = ctk.CTkFrame(self.content_frame, fg_color="transparent")
@@ -884,6 +927,76 @@ class MainWindow(ctk.CTk):
             print("[UI] Clipboard pasted into input field.")
         except Exception:
             print("[UI] Paste failed - Clipboard is empty or contains non-text content.")
+
+    def _handle_batch_urls(self):
+        def on_batch(urls: list[str]):
+            if not urls:
+                return
+            # Queue each URL through normal fetch flow sequentially (async each)
+            for i, u in enumerate(urls):
+                self.after(i * 200, lambda url=u: self._queue_single_url(url))
+
+        BatchUrlsDialog(self, on_submit=on_batch)
+
+    def _queue_single_url(self, url: str):
+        """Programmatic add (batch) without clearing focus awkwardly."""
+        url = (url or "").strip()
+        from core.utils import is_http_url
+
+        if not is_http_url(url):
+            return
+        self.status_left.configure(text=f"Fetching… {url[:40]}")
+        p_map = {"High": 0, "Normal": 1, "Low": 2}
+        pri = p_map.get(self.priority_var.get(), 1)
+
+        def info_callback(success, data):
+            def update_ui():
+                if not success:
+                    self.status_left.configure(
+                        text=f"Batch skip: {str(data).split(chr(10))[0][:50]}"
+                    )
+                    return
+                platform = URLRouter.get_platform(url)
+                _type = data.get("_type", "video")
+                if _type == "playlist":
+                    # Add first N entries or flat list
+                    entries = [e for e in (data.get("entries") or []) if e][:50]
+                    for entry in entries:
+                        entry_url = entry.get("url") or entry.get("webpage_url")
+                        if not entry_url:
+                            continue
+                        job_id = str(uuid.uuid4())
+                        entry = dict(entry)
+                        entry["id"] = job_id
+                        entry["playlist_title"] = data.get("title", "Playlist")
+                        title = entry.get("title", "Video")
+                        self._add_queue_item(job_id, title, platform)
+                        self.queue_manager.add_job(
+                            entry_url,
+                            entry,
+                            priority=pri,
+                            format_str=self.license.clamp_format(
+                                ConfigManager().get("default_quality", "1080")
+                            )[0],
+                            platform=platform,
+                        )
+                else:
+                    job_id = str(uuid.uuid4())
+                    meta = data.copy()
+                    meta["id"] = job_id
+                    title = data.get("title", "Unknown")
+                    self._add_queue_item(job_id, title, platform)
+                    fmt = self.license.clamp_format(
+                        ConfigManager().get("default_quality", "1080")
+                    )[0]
+                    self.queue_manager.add_job(
+                        url, meta, priority=pri, format_str=fmt, platform=platform
+                    )
+                self.status_left.configure(text="Batch item queued")
+
+            self.after(0, update_ui)
+
+        self.queue_manager.fetch_info_async(url, info_callback)
 
     def _handle_add_to_queue(self):
         url = self.url_input.get().strip()
