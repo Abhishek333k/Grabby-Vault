@@ -36,9 +36,21 @@ Source: `docs/AUDIT_REPORT.md` priority backlog
 | Retry | error cards get ↻ retry |
 | run.bat | prefer `venv\`; auto-create config from example |
 
+## Later production pass
+
+| Item | Fix |
+|------|-----|
+| Process download cancel | Watchdog thread kills yt-dlp on stall + abort |
+| Progress UI | Handles `_percent` from process runner; cleaner speed text |
+| Maximize | Work-area geometry for borderless window |
+| Status bar | No fake “Network Connected” |
+| utils / plugin_manager | Minimal real implementations |
+| Scratch scripts | Removed `scratch_acrylic.py`, `test_dl.py` |
+| Cancel/pause | Immediate `runner.kill()` from queue manager |
+
 ## Still soft / known limits
 
-- Pause is **stop-and-resume** (not true mid-stream pause of yt-dlp)
-- Cancel only aborts on next progress tick (or between extract/download)
-- DRM / hard anti-crack not claimed
-- Playwright still optional/heavy
+- Pause is **stop-and-resume** (not true mid-stream pause)
+- License seat model is not DRM
+- Playwright remains optional/heavy
+- Open items live in `docs/AUDIT_REPORT.md` only

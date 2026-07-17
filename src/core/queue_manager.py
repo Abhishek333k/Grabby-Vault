@@ -119,15 +119,25 @@ class QueueManager:
             job["status"] = "cancelled"
             job["abort"] = "cancelled"
             self.db.update_status(job_id, "cancelled")
+            self._kill_active_download()
 
     def pause_job(self, job_id):
         job = self.jobs.get(job_id)
         if job:
-            # Active download: abort yt-dlp then mark paused (re-queue on resume)
+            # Active download: abort process then mark paused (re-queue on resume)
             if job["status"] == "downloading":
                 job["abort"] = "paused"
             job["status"] = "paused"
             self.db.update_status(job_id, "paused")
+            self._kill_active_download()
+
+    def _kill_active_download(self):
+        runner = getattr(self.downloader, "_active_runner", None)
+        if runner is not None:
+            try:
+                runner.kill()
+            except Exception:
+                pass
 
     def resume_job(self, job_id):
         job = self.jobs.get(job_id)

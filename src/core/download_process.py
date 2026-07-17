@@ -1,17 +1,17 @@
 """
-Subprocess-based yt-dlp runner for hard cancel/pause (production).
+Subprocess-based yt-dlp runner for hard cancel/pause.
 
-Progress is parsed from yt-dlp --newline stderr lines.
-Kill terminates the OS process — more reliable than progress-hook-only abort.
+Progress parsed from yt-dlp --newline output.
+A watchdog thread kills the process if abort is set during silent stalls.
 """
 from __future__ import annotations
 
-import json
 import os
 import re
 import subprocess
 import sys
 import threading
+import time
 from typing import Callable
 
 from core.logging_setup import get_logger
@@ -20,15 +20,24 @@ from core.paths import ffmpeg_location_for_ytdlp
 log = get_logger("grabbyvault.download_process")
 
 _PCT = re.compile(r"(\d+(?:\.\d+)?)%")
-_SPEED = re.compile(r"at\s+([0-9.]+[KMG]?i?B/s)", re.I)
+_SPEED = re.compile(r"at\s+([\d.]+)\s*([KMG]i?B)/s", re.I)
+_ETA = re.compile(r"ETA\s+(\d+:\d+(?::\d+)?)", re.I)
+
+
+def _speed_to_bps(value: float, unit: str) -> float:
+    u = unit.upper().replace("I", "")
+    mult = {"B": 1, "KB": 1024, "MB": 1024**2, "GB": 1024**3}.get(u, 1)
+    return value * mult
 
 
 class ProcessDownloadRunner:
     def __init__(self):
         self._proc: subprocess.Popen | None = None
         self._lock = threading.Lock()
+        self._kill_requested = False
 
     def kill(self):
+        self._kill_requested = True
         with self._lock:
             proc = self._proc
         if not proc or proc.poll() is not None:
@@ -39,6 +48,7 @@ class ProcessDownloadRunner:
                 proc.wait(timeout=3)
             except subprocess.TimeoutExpired:
                 proc.kill()
+                proc.wait(timeout=2)
         except Exception as e:
             log.warning("kill download process: %s", e)
 
@@ -53,10 +63,6 @@ class ProcessDownloadRunner:
         progress_callback: Callable | None = None,
         abort_check: Callable | None = None,
     ) -> str | None:
-        """
-        Returns last known output path (best effort).
-        Raises RuntimeError with cancelled/paused/failed message.
-        """
         ffmpeg_loc = ffmpeg_location_for_ytdlp()
         cmd = [
             sys.executable,
@@ -74,11 +80,12 @@ class ProcessDownloadRunner:
             "10",
             "--fragment-retries",
             "10",
+            "--concurrent-fragments",
+            "4",
         ]
         if ffmpeg_loc:
             cmd.extend(["--ffmpeg-location", ffmpeg_loc])
         if http_headers:
-            # pass common headers
             ua = http_headers.get("user-agent") or http_headers.get("User-Agent")
             ref = http_headers.get("referer") or http_headers.get("Referer")
             if ua:
@@ -87,7 +94,6 @@ class ProcessDownloadRunner:
                 cmd.extend(["--referer", ref])
             cookie = http_headers.get("cookie") or http_headers.get("Cookie")
             if cookie:
-                # yt-dlp accepts --add-header
                 cmd.extend(["--add-header", f"Cookie:{cookie}"])
 
         cmd.append(url)
@@ -101,6 +107,7 @@ class ProcessDownloadRunner:
         if os.name == "nt":
             creationflags = subprocess.CREATE_NO_WINDOW  # type: ignore[attr-defined]
 
+        self._kill_requested = False
         proc = subprocess.Popen(
             cmd,
             stdout=subprocess.PIPE,
@@ -113,6 +120,20 @@ class ProcessDownloadRunner:
         )
         with self._lock:
             self._proc = proc
+
+        stop_watch = threading.Event()
+
+        def _watchdog():
+            while not stop_watch.wait(0.4):
+                if not abort_check:
+                    continue
+                reason = abort_check()
+                if reason in ("cancelled", "paused") or self._kill_requested:
+                    self.kill()
+                    return
+
+        wd = threading.Thread(target=_watchdog, daemon=True, name="dl-watchdog")
+        wd.start()
 
         last_file = None
         try:
@@ -129,35 +150,38 @@ class ProcessDownloadRunner:
                             else "Download paused by user"
                         )
 
-                # Destination / merging lines often include path
                 if "Destination:" in line:
-                    last_file = line.split("Destination:", 1)[-1].strip()
+                    last_file = line.split("Destination:", 1)[-1].strip().strip('"')
                 if "[Merger] Merging formats into" in line:
-                    m = re.search(r"into \"(.+)\"", line)
+                    m = re.search(r'into ["\'](.+?)["\']', line)
                     if m:
                         last_file = m.group(1)
-                if line.startswith("[download]") and progress_callback:
+                if "[ExtractAudio]" in line and "Destination:" in line:
+                    last_file = line.split("Destination:", 1)[-1].strip().strip('"')
+
+                if progress_callback and (
+                    line.startswith("[download]") or "ETA" in line
+                ):
                     pct = 0.0
                     m = _PCT.search(line)
                     if m:
-                        pct = float(m.group(1)) / 100.0
+                        pct = min(1.0, float(m.group(1)) / 100.0)
                     speed = None
                     sm = _SPEED.search(line)
                     if sm:
-                        # leave raw; UI expects bytes/sec ideally
-                        speed = None
+                        try:
+                            speed = _speed_to_bps(float(sm.group(1)), sm.group(2))
+                        except ValueError:
+                            speed = None
                     progress_callback(
                         {
                             "status": "downloading",
-                            "downloaded_bytes": 0,
-                            "total_bytes": 0,
-                            "total_bytes_estimate": 0,
-                            "_percent_str": f"{pct*100:.1f}%",
-                            "speed": speed,
-                            "_line": line,
-                            # approximate for UI when only percent known
-                            "downloaded_bytes": int(pct * 1_000_000),
+                            "downloaded_bytes": int(pct * 1_000_000) if pct else 0,
                             "total_bytes": 1_000_000 if pct else 0,
+                            "total_bytes_estimate": 1_000_000 if pct else 0,
+                            "speed": speed,
+                            "_percent": pct,
+                            "_line": line,
                         }
                     )
 
@@ -169,15 +193,16 @@ class ProcessDownloadRunner:
                     if reason == "cancelled"
                     else "Download paused by user"
                 )
+            if self._kill_requested:
+                raise RuntimeError("Download cancelled by user")
             if rc != 0:
                 raise RuntimeError(f"yt-dlp exited with code {rc}")
             if last_file and os.path.isfile(last_file):
                 if progress_callback:
-                    progress_callback(
-                        {"status": "finished", "filename": last_file}
-                    )
+                    progress_callback({"status": "finished", "filename": last_file})
                 return last_file
             return last_file
         finally:
+            stop_watch.set()
             with self._lock:
                 self._proc = None

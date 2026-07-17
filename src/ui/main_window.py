@@ -250,7 +250,7 @@ class MainWindow(ctk.CTk):
         
         self.status_left = ctk.CTkLabel(
             self.status_bar, 
-            text="System Ready | Network Connected", 
+            text="Ready", 
             font=("Segoe UI", 11), 
             text_color=TEXT_MUTED
         )
@@ -258,7 +258,7 @@ class MainWindow(ctk.CTk):
         
         self.status_right = ctk.CTkLabel(
             self.status_bar, 
-            text="Speed: 0.0 KB/s", 
+            text="Speed: —", 
             font=("Segoe UI", 11), 
             text_color=NEON_PURPLE
         )
@@ -537,29 +537,43 @@ class MainWindow(ctk.CTk):
             
         card = self.queue_cards[job_id]
         
-        if d['status'] == 'downloading':
+        if d.get("status") == "downloading":
             try:
-                downloaded_bytes = d.get('downloaded_bytes', 0)
-                total_bytes = d.get('total_bytes') or d.get('total_bytes_estimate', 0)
-                speed = d.get('speed', 0)
-                
-                percent = (downloaded_bytes / total_bytes) if total_bytes else 0
-                speed_str = f"{speed / 1024 / 1024:.1f} MB/s" if speed else "Unknown speed"
-                
-                if total_bytes:
-                    status_text = f"Downloading... {downloaded_bytes / 1024 / 1024:.1f}MB / {total_bytes / 1024 / 1024:.1f}MB ({int(percent * 100)}%)"
+                downloaded_bytes = d.get("downloaded_bytes", 0) or 0
+                total_bytes = d.get("total_bytes") or d.get("total_bytes_estimate") or 0
+                speed = d.get("speed") or 0
+                percent = d.get("_percent")
+                if percent is None:
+                    percent = (downloaded_bytes / total_bytes) if total_bytes else 0
+                percent = max(0.0, min(1.0, float(percent)))
+
+                if speed and speed > 0:
+                    if speed >= 1024 * 1024:
+                        speed_str = f"{speed / 1024 / 1024:.1f} MB/s"
+                    else:
+                        speed_str = f"{speed / 1024:.0f} KB/s"
                 else:
-                    status_text = f"Downloading... {downloaded_bytes / 1024 / 1024:.1f}MB ({int(percent * 100)}%)"
-                
-                card['pb'].set(percent)
-                card['lbl_status'].configure(text=status_text)
+                    speed_str = "…"
+
+                if total_bytes and total_bytes != 1_000_000:
+                    status_text = (
+                        f"Downloading… {downloaded_bytes / 1024 / 1024:.1f}MB / "
+                        f"{total_bytes / 1024 / 1024:.1f}MB ({int(percent * 100)}%)"
+                    )
+                else:
+                    status_text = f"Downloading… {int(percent * 100)}%"
+
+                card["pb"].set(percent)
+                card["lbl_status"].configure(text=status_text)
                 self.status_right.configure(text=f"Speed: {speed_str}")
             except Exception as e:
                 print(f"Error parsing progress: {e}")
-        elif d['status'] == 'finished':
-            card['lbl_status'].configure(text="Merging fragments...", text_color=NEON_BLUE)
-            card['pb'].set(1.0)
-            self.status_right.configure(text=f"Speed: 0.0 MB/s")
+        elif d.get("status") == "finished":
+            card["lbl_status"].configure(
+                text="Processing…", text_color=NEON_BLUE
+            )
+            card["pb"].set(1.0)
+            self.status_right.configure(text="Speed: —")
 
     def _on_download_finish(self, job_id, filepath=None):
         self.ui_queue.put(('finish', job_id, filepath))
@@ -796,13 +810,52 @@ class MainWindow(ctk.CTk):
 
     # Window Actions
     def _toggle_maximize(self):
+        """Borderless-safe maximize using work-area geometry (not state('zoomed'))."""
         if not self.is_maximized:
             self.normal_geometry = self.geometry()
-            self.state('zoomed')
+            try:
+                if os.name == "nt":
+                    import ctypes
+                    from ctypes import wintypes
+
+                    class RECT(ctypes.Structure):
+                        _fields_ = [
+                            ("left", ctypes.c_long),
+                            ("top", ctypes.c_long),
+                            ("right", ctypes.c_long),
+                            ("bottom", ctypes.c_long),
+                        ]
+
+                    class MONITORINFO(ctypes.Structure):
+                        _fields_ = [
+                            ("cbSize", ctypes.c_ulong),
+                            ("rcMonitor", RECT),
+                            ("rcWork", RECT),
+                            ("dwFlags", ctypes.c_ulong),
+                        ]
+
+                    hwnd = ctypes.windll.user32.GetParent(self.winfo_id())
+                    monitor = ctypes.windll.user32.MonitorFromWindow(hwnd, 2)
+                    mi = MONITORINFO()
+                    mi.cbSize = ctypes.sizeof(MONITORINFO)
+                    ctypes.windll.user32.GetMonitorInfoW(monitor, ctypes.byref(mi))
+                    x, y = mi.rcWork.left, mi.rcWork.top
+                    w = mi.rcWork.right - mi.rcWork.left
+                    h = mi.rcWork.bottom - mi.rcWork.top
+                    self.geometry(f"{w}x{h}+{x}+{y}")
+                else:
+                    self.state("zoomed")
+            except Exception:
+                sw = self.winfo_screenwidth()
+                sh = self.winfo_screenheight()
+                self.geometry(f"{sw}x{sh}+0+0")
             self.is_maximized = True
             self.btn_max.configure(text="❐")
         else:
-            self.state('normal')
+            try:
+                self.state("normal")
+            except Exception:
+                pass
             self.geometry(self.normal_geometry)
             self.is_maximized = False
             self.btn_max.configure(text="▢")
@@ -834,10 +887,12 @@ class MainWindow(ctk.CTk):
 
     def _handle_add_to_queue(self):
         url = self.url_input.get().strip()
+        from core.utils import is_http_url
+
         if not url:
             self.status_left.configure(text="Paste a video URL first")
             return
-        if not (url.startswith("http://") or url.startswith("https://")):
+        if not is_http_url(url):
             self.status_left.configure(text="URL must start with http:// or https://")
             return
 
