@@ -275,28 +275,59 @@ class Downloader:
             opts.get("format"),
             preset.get("id"),
         )
-        with yt_dlp.YoutubeDL(opts) as ydl:
-            # Extra abort check before heavy work
-            if abort_check and abort_check() in ("cancelled", "paused"):
-                raise DownloadAborted(abort_check())
-            info = ydl.extract_info(url, download=True)
-            if info and not last_filepath["path"]:
-                try:
-                    last_filepath["path"] = ydl.prepare_filename(info)
-                except Exception:
-                    pass
-            # Prefer merged final name
-            if info and info.get("requested_downloads"):
-                for rd in info["requested_downloads"]:
-                    fp = rd.get("filepath")
-                    if fp and os.path.isfile(fp):
-                        last_filepath["path"] = fp
-            elif info and info.get("_filename") and os.path.isfile(info["_filename"]):
-                last_filepath["path"] = info["_filename"]
+
+        use_proc = bool(self.config.get("use_process_download", True))
+        # Process runner cannot easily do audio extract postprocessors — use in-process
+        if use_proc and not preset.get("audio_only"):
+            from core.download_process import ProcessDownloadRunner
+
+            runner = ProcessDownloadRunner()
+            # Stash for emergency kill if needed
+            self._active_runner = runner
+            try:
+                if abort_check and abort_check() in ("cancelled", "paused"):
+                    raise DownloadAborted(abort_check())
+                path = runner.run(
+                    url,
+                    format_str=opts["format"],
+                    outtmpl=opts["outtmpl"],
+                    merge_format=opts.get("merge_output_format") or "mp4",
+                    http_headers=opts.get("http_headers"),
+                    progress_callback=progress_callback,
+                    abort_check=abort_check,
+                )
+                last_filepath["path"] = path
+            except RuntimeError as e:
+                msg = str(e)
+                if "cancelled by user" in msg.lower():
+                    raise DownloadAborted("cancelled") from e
+                if "paused by user" in msg.lower():
+                    raise DownloadAborted("paused") from e
+                raise
+            finally:
+                self._active_runner = None
+        else:
+            with yt_dlp.YoutubeDL(opts) as ydl:
+                if abort_check and abort_check() in ("cancelled", "paused"):
+                    raise DownloadAborted(abort_check())
+                info = ydl.extract_info(url, download=True)
+                if info and not last_filepath["path"]:
+                    try:
+                        last_filepath["path"] = ydl.prepare_filename(info)
+                    except Exception:
+                        pass
+                if info and info.get("requested_downloads"):
+                    for rd in info["requested_downloads"]:
+                        fp = rd.get("filepath")
+                        if fp and os.path.isfile(fp):
+                            last_filepath["path"] = fp
+                elif info and info.get("_filename") and os.path.isfile(
+                    info["_filename"]
+                ):
+                    last_filepath["path"] = info["_filename"]
 
         path = last_filepath["path"]
         if path and not os.path.isfile(path):
-            # Try common merged extensions
             base, _ = os.path.splitext(path)
             for ext in (".mp4", ".mkv", ".webm", ".m4a", ".mp3"):
                 cand = base + ext

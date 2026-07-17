@@ -31,8 +31,11 @@ class ConfigManager:
             "license_heartbeat_seconds": 180,
             "license_single_seat_grace_seconds": 21600,
             "pro_unlocked": False,
-            # Release builds should ship with False (see config.example.json)
-            "allow_dev_keys": True,
+            # Production default False — enable only for local source debugging
+            "allow_dev_keys": False,
+            "use_process_download": True,
+            "lemonsqueezy_variant_ids": [],
+            "first_run_done": False,
             "lemonsqueezy_checkout_url": "https://store.silenvault.com",
             "lemonsqueezy_donate_url": "https://store.silenvault.com/sponsor/",
             "lemonsqueezy_product_ids": [],

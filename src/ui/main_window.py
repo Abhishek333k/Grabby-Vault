@@ -93,6 +93,8 @@ class MainWindow(ctk.CTk):
 
         # Load persistent jobs into UI
         self.after(100, self._load_persistent_jobs)
+        # First-run production checks (ffmpeg, config)
+        self.after(400, self._first_run_checks)
 
     def _load_persistent_jobs(self):
         for job_id, job in self.queue_manager.jobs.items():
@@ -116,6 +118,28 @@ class MainWindow(ctk.CTk):
                     text_color=NEON_BLUE,
                     command=lambda j=job_id: self._handle_retry(j),
                 )
+
+    def _first_run_checks(self):
+        """Production first-run: warn if ffmpeg missing; mark first_run_done."""
+        from core.paths import bin_dir, ffmpeg_path
+        from tkinter import messagebox
+
+        cfg = ConfigManager()
+        if not ffmpeg_path():
+            messagebox.showwarning(
+                "GrabbyVault — ffmpeg required",
+                "ffmpeg was not found.\n\n"
+                "Without ffmpeg, video+audio merge often fails "
+                "(pixelated or silent files).\n\n"
+                f"Place ffmpeg.exe and ffprobe.exe in:\n{bin_dir()}\n\n"
+                "Then restart GrabbyVault.",
+                parent=self,
+            )
+            self.status_left.configure(
+                text="WARNING: ffmpeg missing — quality merges will fail"
+            )
+        if not cfg.get("first_run_done"):
+            cfg.set("first_run_done", True)
                     
     def _enable_taskbar_integration(self):
         """
