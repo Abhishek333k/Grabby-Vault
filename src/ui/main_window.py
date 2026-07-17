@@ -79,10 +79,13 @@ class MainWindow(ctk.CTk):
         self.on_close_callback = None
         
         self.license = LicenseManager()
+        # Single-seat: if heartbeat revokes Pro, update UI immediately
+        self.license.set_demote_callback(self._on_license_demoted)
 
         # Create all layout components
         self._create_layout()
         self.refresh_license_ui()
+        self.license.start_heartbeat()
 
         # Load persistent jobs into UI
         self.after(100, self._load_persistent_jobs)
@@ -609,10 +612,21 @@ class MainWindow(ctk.CTk):
         else:
             self.tier_badge.configure(text="FREE", text_color=TEXT_MUTED)
             self.btn_pro.configure(text="Pro", fg_color=NEON_PURPLE)
-        # Status bar plan hint
         if hasattr(self, "status_left"):
             plan = self.license.tier_label()
-            self.status_left.configure(text=f"SYSTEM READY · {plan}")
+            seat = self.license.seat_status_text()
+            self.status_left.configure(text=f"{plan} · {seat}"[:70])
+
+    def _on_license_demoted(self, reason: str):
+        """Called from license heartbeat thread when single-seat is lost."""
+        def ui():
+            self.refresh_license_ui()
+            if hasattr(self, "status_left"):
+                self.status_left.configure(
+                    text=f"PRO REVOKED · {(reason or '')[:50]}".upper()
+                )
+            print(f"[License] Demoted: {reason}")
+        self.after(0, ui)
 
     def _filter_queue(self, *args):
         query = self.search_var.get().lower()

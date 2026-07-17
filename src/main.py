@@ -49,14 +49,18 @@ def main():
         root_holder["tray"] = tray
         tray.run()
 
-        # Background license revalidate (Layer B)
+        # Heartbeat already started in MainWindow; one immediate check
         def bg_license():
             try:
                 lic = LicenseManager()
-                if lic.license_key and lic.config.get("license_activated"):
-                    ok, msg = lic.revalidate_online()
-                    print(f"[License] revalidate: {ok} ({msg})")
+                lic.set_demote_callback(
+                    lambda reason: app.after(0, lambda: app._on_license_demoted(reason))
+                )
+                if lic.license_key:
+                    ok, msg = lic.revalidate_online(force_demote=True)
+                    print(f"[License] startup revalidate: {ok} ({msg})")
                     app.after(0, app.refresh_license_ui)
+                lic.start_heartbeat()
             except Exception as e:
                 print(f"[License] revalidate error: {e}")
 

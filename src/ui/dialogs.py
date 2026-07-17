@@ -425,7 +425,7 @@ class LicenseDialog(ctk.CTkToplevel):
     def __init__(self, master):
         super().__init__(master)
         self.title("License — GrabbyVault Pro")
-        self.geometry("480x420")
+        self.geometry("500x520")
         self.resizable(False, False)
         self.transient(master)
         self.grab_set()
@@ -479,31 +479,65 @@ class LicenseDialog(ctk.CTkToplevel):
         )
         self.msg.pack(pady=4)
 
+        ctk.CTkLabel(
+            self,
+            text=self.license.seat_status_text(),
+            font=("Segoe UI", 11),
+            text_color=NEON_PURPLE if self.license.is_pro else TEXT_MUTED,
+        ).pack(pady=(0, 6))
+
+        ctk.CTkLabel(
+            self,
+            text=(
+                "Single-seat mode: only this PC uses Pro at a time "
+                "(like one Netflix screen). Sharing the key does not unlock "
+                "two machines at once."
+            ),
+            font=("Segoe UI", 10),
+            text_color=TEXT_MUTED,
+            wraplength=420,
+            justify="center",
+        ).pack(padx=20, pady=(0, 8))
+
         row = ctk.CTkFrame(self, fg_color="transparent")
-        row.pack(pady=10)
+        row.pack(pady=8)
         self.btn_act = ctk.CTkButton(
-            row, text="Activate", width=110, fg_color=NEON_BLUE, command=self._activate
+            row, text="Activate", width=100, fg_color=NEON_BLUE, command=self._activate
         )
-        self.btn_act.pack(side="left", padx=6)
+        self.btn_act.pack(side="left", padx=4)
+        self.btn_takeover = ctk.CTkButton(
+            row,
+            text="Take over this PC",
+            width=130,
+            fg_color=NEON_PURPLE,
+            command=self._takeover,
+        )
+        self.btn_takeover.pack(side="left", padx=4)
         ctk.CTkButton(
             row,
             text="Buy Pro",
-            width=110,
-            fg_color=NEON_PURPLE,
+            width=90,
+            fg_color="transparent",
+            border_width=1,
+            border_color=NEON_PURPLE,
+            text_color=NEON_PURPLE,
             command=lambda: webbrowser.open(self.license.checkout_url()),
-        ).pack(side="left", padx=6)
+        ).pack(side="left", padx=4)
+
+        row2 = ctk.CTkFrame(self, fg_color="transparent")
+        row2.pack(pady=6)
         ctk.CTkButton(
-            row,
-            text="Deactivate",
-            width=100,
+            row2,
+            text="Release seat",
+            width=110,
             fg_color="transparent",
             border_width=1,
             border_color=BORDER_MUTED,
             text_color=TEXT_MUTED,
             command=self._deactivate,
-        ).pack(side="left", padx=6)
+        ).pack(side="left", padx=4)
         ctk.CTkButton(
-            row,
+            row2,
             text="Close",
             width=80,
             fg_color="transparent",
@@ -511,7 +545,7 @@ class LicenseDialog(ctk.CTkToplevel):
             border_color=BORDER_MUTED,
             text_color=TEXT_PRIMARY,
             command=self.destroy,
-        ).pack(side="left", padx=6)
+        ).pack(side="left", padx=4)
 
         if self.license.allow_dev_keys:
             ctk.CTkLabel(
@@ -519,7 +553,7 @@ class LicenseDialog(ctk.CTkToplevel):
                 text="Dev: GV-PRO-DEV-UNLOCK  ·  set allow_dev_keys=false for release",
                 font=("Segoe UI", 10),
                 text_color=TEXT_MUTED,
-            ).pack(pady=(10, 0))
+            ).pack(pady=(8, 0))
 
     def _activate(self):
         import threading
@@ -533,8 +567,24 @@ class LicenseDialog(ctk.CTkToplevel):
 
         threading.Thread(target=work, daemon=True).start()
 
-    def _done(self, ok, message):
+    def _takeover(self):
+        import threading
+
+        self.btn_takeover.configure(state="disabled", text="…")
+        self.msg.configure(
+            text="Moving single seat to this PC (other device loses Pro)…",
+            text_color=TEXT_MUTED,
+        )
+
+        def work():
+            ok, message = self.license.take_over_device(self.key_var.get())
+            self.after(0, lambda: self._done(ok, message, takeover=True))
+
+        threading.Thread(target=work, daemon=True).start()
+
+    def _done(self, ok, message, takeover=False):
         self.btn_act.configure(state="normal", text="Activate")
+        self.btn_takeover.configure(state="normal", text="Take over this PC")
         self.msg.configure(text=message, text_color=NEON_GREEN if ok else NEON_RED)
         if ok:
             self.lbl_status.configure(text="Current plan: PRO ✓", text_color=NEON_GREEN)
