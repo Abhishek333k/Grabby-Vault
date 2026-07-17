@@ -19,29 +19,28 @@ from core.logging_setup import get_logger
 log = get_logger("grabbyvault.downloader")
 
 
+class DownloadAborted(Exception):
+    """Raised when user cancels or pauses an active download."""
+
+    def __init__(self, reason: str = "cancelled"):
+        self.reason = reason  # 'cancelled' | 'paused'
+        super().__init__(
+            "Download cancelled by user"
+            if reason == "cancelled"
+            else "Download paused by user"
+        )
+
+
 def _detect_js_runtimes() -> dict:
-    """
-    YouTube increasingly needs a JS runtime for full format lists.
-    Prefer node if on PATH (common on Windows).
-    """
     runtimes = {}
-    node = shutil.which("node")
-    if node:
-        runtimes["node"] = {"path": node}
-    deno = shutil.which("deno")
-    if deno:
-        runtimes["deno"] = {"path": deno}
-    bun = shutil.which("bun")
-    if bun:
-        runtimes["bun"] = {"path": bun}
+    for name in ("node", "deno", "bun"):
+        path = shutil.which(name)
+        if path:
+            runtimes[name] = {"path": path}
     return runtimes
 
 
 class Downloader:
-    """
-    Core engine wrapper for yt-dlp to handle video downloading operations.
-    """
-
     def __init__(self):
         self.config = ConfigManager()
         self._rebuild_base_opts()
@@ -53,8 +52,9 @@ class Downloader:
 
         ff_exe = ffmpeg_path()
         self._ffmpeg_ok = ff_exe is not None
-        # Directory containing ffmpeg.exe (yt-dlp also accepts the binary path)
-        ffmpeg_loc = ffmpeg_location_for_ytdlp() or (os.path.dirname(ff_exe) if ff_exe else None)
+        ffmpeg_loc = ffmpeg_location_for_ytdlp() or (
+            os.path.dirname(ff_exe) if ff_exe else None
+        )
 
         self.ydl_opts = {
             "outtmpl": outtmpl,
@@ -81,15 +81,13 @@ class Downloader:
         }
         if ffmpeg_loc:
             self.ydl_opts["ffmpeg_location"] = ffmpeg_loc
-        # Put bin/ on PATH so yt-dlp's internal "ffmpeg available?" checks succeed
         if ffmpeg_loc and ffmpeg_loc not in os.environ.get("PATH", ""):
             os.environ["PATH"] = ffmpeg_loc + os.pathsep + os.environ.get("PATH", "")
 
         js = _detect_js_runtimes()
         if js:
-            # yt-dlp 2025+ uses js_runtimes dict
             self.ydl_opts["js_runtimes"] = js
-            log.info("JS runtimes for yt-dlp: %s", list(js.keys()))
+            log.debug("JS runtimes for yt-dlp: %s", list(js.keys()))
         else:
             log.warning(
                 "No JS runtime (node/deno) found — YouTube formats may be limited."
@@ -108,7 +106,6 @@ class Downloader:
         )
 
     def health_check(self) -> dict:
-        """Return status for Settings UI."""
         self._rebuild_base_opts()
         return {
             "ffmpeg_ok": self._ffmpeg_ok,
@@ -161,7 +158,9 @@ class Downloader:
                         return info
             except Exception as e:
                 err_str = str(e)
-                log.warning("fetch_info attempt failed (%s): %s", attempt["desc"], err_str)
+                log.warning(
+                    "fetch_info attempt failed (%s): %s", attempt["desc"], err_str
+                )
                 if "Unsupported URL" in err_str:
                     errors.append("Unsupported URL")
                     break
@@ -174,7 +173,11 @@ class Downloader:
             try:
                 from core.playwright_extractor import PlaywrightExtractor
 
-                info = PlaywrightExtractor.extract_streams(url)
+                headless = bool(self.config.get("playwright_headless", False))
+                timeout = int(self.config.get("playwright_timeout_seconds", 45) or 45)
+                info = PlaywrightExtractor.extract_streams(
+                    url, timeout_seconds=timeout, headless=headless
+                )
                 if info:
                     return info
             except Exception as pe:
@@ -191,11 +194,30 @@ class Downloader:
         raise Exception(f"All extraction methods failed. Last error: {last_err}")
 
     def download_video(
-        self, url: str, format_str: str = None, progress_callback=None, metadata=None
-    ):
+        self,
+        url: str,
+        format_str: str = None,
+        progress_callback=None,
+        metadata=None,
+        abort_check=None,
+    ) -> str | None:
+        """
+        Download and return final filepath if known.
+        abort_check: callable () -> 'cancelled'|'paused'|None
+        """
         self._rebuild_base_opts()
+        last_filepath = {"path": None}
 
         def _hook(d):
+            if abort_check:
+                reason = abort_check()
+                if reason in ("cancelled", "paused"):
+                    raise DownloadAborted(reason)
+            status = d.get("status")
+            if status == "finished":
+                fn = d.get("filename")
+                if fn:
+                    last_filepath["path"] = fn
             if progress_callback:
                 progress_callback(d)
 
@@ -254,7 +276,34 @@ class Downloader:
             preset.get("id"),
         )
         with yt_dlp.YoutubeDL(opts) as ydl:
-            ydl.download([url])
+            # Extra abort check before heavy work
+            if abort_check and abort_check() in ("cancelled", "paused"):
+                raise DownloadAborted(abort_check())
+            info = ydl.extract_info(url, download=True)
+            if info and not last_filepath["path"]:
+                try:
+                    last_filepath["path"] = ydl.prepare_filename(info)
+                except Exception:
+                    pass
+            # Prefer merged final name
+            if info and info.get("requested_downloads"):
+                for rd in info["requested_downloads"]:
+                    fp = rd.get("filepath")
+                    if fp and os.path.isfile(fp):
+                        last_filepath["path"] = fp
+            elif info and info.get("_filename") and os.path.isfile(info["_filename"]):
+                last_filepath["path"] = info["_filename"]
+
+        path = last_filepath["path"]
+        if path and not os.path.isfile(path):
+            # Try common merged extensions
+            base, _ = os.path.splitext(path)
+            for ext in (".mp4", ".mkv", ".webm", ".m4a", ".mp3"):
+                cand = base + ext
+                if os.path.isfile(cand):
+                    path = cand
+                    break
+        return path if path and os.path.isfile(path) else last_filepath["path"]
 
     @staticmethod
     def fetch_thumbnail(url: str):

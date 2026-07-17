@@ -228,7 +228,7 @@ class SettingsDialog(ctk.CTkToplevel):
     def __init__(self, master, queue_manager):
         super().__init__(master)
         self.title("Settings")
-        self.geometry("480x520")
+        self.geometry("480x620")
         self.resizable(False, False)
 
         self.transient(master)
@@ -296,6 +296,38 @@ class SettingsDialog(ctk.CTkToplevel):
                 font=("Segoe UI", 11),
                 text_color=TEXT_MUTED,
             ).pack(anchor="w")
+
+        # Toggles
+        toggles = ctk.CTkFrame(self, fg_color="transparent")
+        toggles.pack(fill="x", padx=20, pady=8)
+        self.acrylic_var = ctk.BooleanVar(value=bool(self.config.get("use_acrylic", True)))
+        self.open_done_var = ctk.BooleanVar(
+            value=bool(self.config.get("open_folder_on_complete", False))
+        )
+        self.headless_var = ctk.BooleanVar(
+            value=bool(self.config.get("playwright_headless", False))
+        )
+        ctk.CTkCheckBox(
+            toggles,
+            text="Window acrylic / transparency (restart to apply)",
+            variable=self.acrylic_var,
+            text_color=TEXT_PRIMARY,
+            fg_color=NEON_PURPLE,
+        ).pack(anchor="w", pady=2)
+        ctk.CTkCheckBox(
+            toggles,
+            text="Open folder when download completes",
+            variable=self.open_done_var,
+            text_color=TEXT_PRIMARY,
+            fg_color=NEON_PURPLE,
+        ).pack(anchor="w", pady=2)
+        ctk.CTkCheckBox(
+            toggles,
+            text="Playwright advanced extract headless (no browser window)",
+            variable=self.headless_var,
+            text_color=TEXT_PRIMARY,
+            fg_color=NEON_PURPLE,
+        ).pack(anchor="w", pady=2)
 
         # Health
         health = Downloader().health_check()
@@ -415,8 +447,15 @@ class SettingsDialog(ctk.CTkToplevel):
         DonateDialog(self.master)
 
     def _save(self):
-        self.config.set("download_path", self.path_var.get())
-        self.config.set("max_concurrent_downloads", int(self.conc_var.get()))
+        self.config.update(
+            {
+                "download_path": self.path_var.get(),
+                "max_concurrent_downloads": int(self.conc_var.get()),
+                "use_acrylic": bool(self.acrylic_var.get()),
+                "open_folder_on_complete": bool(self.open_done_var.get()),
+                "playwright_headless": bool(self.headless_var.get()),
+            }
+        )
         self.queue_manager.apply_settings_change()
         self.destroy()
 

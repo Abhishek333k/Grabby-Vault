@@ -1,11 +1,13 @@
 import json
 import os
+import threading
 
 from core.paths import app_root, config_path, downloads_dir
 
 
 class ConfigManager:
     _instance = None
+    _file_lock = threading.Lock()
 
     def __new__(cls):
         if cls._instance is None:
@@ -29,6 +31,7 @@ class ConfigManager:
             "license_heartbeat_seconds": 180,
             "license_single_seat_grace_seconds": 21600,
             "pro_unlocked": False,
+            # Release builds should ship with False (see config.example.json)
             "allow_dev_keys": True,
             "lemonsqueezy_checkout_url": "https://store.silenvault.com",
             "lemonsqueezy_donate_url": "https://store.silenvault.com/sponsor/",
@@ -41,24 +44,31 @@ class ConfigManager:
             "write_subtitles": True,
             "embed_thumbnail": True,
             "show_splash": True,
+            "use_acrylic": True,
+            "playwright_headless": False,
+            "playwright_timeout_seconds": 45,
         }
         self.config = self.load_config()
         self._migrate_absolute_dev_paths()
 
     def _migrate_absolute_dev_paths(self):
-        """If download_path points at another machine path, reset to portable default."""
+        """Normalize download_path to a usable portable location when needed."""
         path = self.config.get("download_path") or ""
         root = app_root()
         portable = os.path.join(root, "downloads")
-        # Old hard-coded machine path from early dev
-        if not path or not os.path.isdir(os.path.dirname(path)) and "GitHub Repos" in path:
-            # keep if exists; else portable
-            if not os.path.isdir(path):
-                self.config["download_path"] = portable
-                self.save_config()
-        # Normalize relative "downloads"
-        if path in ("downloads", "./downloads"):
+        changed = False
+
+        if path in ("downloads", "./downloads", ""):
             self.config["download_path"] = portable
+            changed = True
+        elif path and not os.path.isdir(path):
+            # Missing folder: prefer creating portable default over dead absolute path
+            parent = os.path.dirname(path)
+            if not parent or not os.path.isdir(parent):
+                self.config["download_path"] = portable
+                changed = True
+
+        if changed:
             self.save_config()
 
     def load_config(self):
@@ -69,26 +79,36 @@ class ConfigManager:
         try:
             with open(self.config_file, "r", encoding="utf-8") as f:
                 data = json.load(f)
-                config = self.default_config.copy()
+            config = self.default_config.copy()
+            if isinstance(data, dict):
                 config.update(data)
-                self.config = config
-                return self.config
+            self.config = config
+            return self.config
         except Exception as e:
             print(f"Error loading config: {e}")
             self.config = self.default_config.copy()
             return self.config
 
     def _write(self, config_dict):
-        try:
-            os.makedirs(os.path.dirname(self.config_file) or ".", exist_ok=True)
-            with open(self.config_file, "w", encoding="utf-8") as f:
-                json.dump(config_dict, f, indent=4)
-        except Exception as e:
-            print(f"Error saving config: {e}")
+        with self._file_lock:
+            try:
+                parent = os.path.dirname(self.config_file) or "."
+                os.makedirs(parent, exist_ok=True)
+                tmp = self.config_file + ".tmp"
+                with open(tmp, "w", encoding="utf-8") as f:
+                    json.dump(config_dict, f, indent=4)
+                os.replace(tmp, self.config_file)
+            except Exception as e:
+                print(f"Error saving config: {e}")
 
     def save_config(self, config_dict=None):
         if config_dict:
             self.config.update(config_dict)
+        self._write(self.config)
+
+    def update(self, values: dict):
+        """Batch update many keys with a single disk write."""
+        self.config.update(values)
         self._write(self.config)
 
     def get(self, key, default=None):

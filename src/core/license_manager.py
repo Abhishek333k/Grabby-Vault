@@ -262,12 +262,16 @@ class LicenseManager:
         key_upper = key_api.upper()
 
         if self._dev_or_offline_key(key_upper):
-            self.config.set("license_key", key_upper)
-            self.config.set("license_activated", True)
-            self.config.set("license_instance_id", "dev-local")
-            self.config.set("license_machine_fp", self._fp)
-            self.config.set("license_last_check", time.time())
-            self.config.set("pro_unlocked", False)
+            self.config.update(
+                {
+                    "license_key": key_upper,
+                    "license_activated": True,
+                    "license_instance_id": "dev-local",
+                    "license_machine_fp": self._fp,
+                    "license_last_check": time.time(),
+                    "pro_unlocked": False,
+                }
+            )
             self.start_heartbeat()
             return True, "Pro activated (developer key) on this PC only."
 
@@ -362,13 +366,17 @@ class LicenseManager:
     ) -> tuple[bool, str]:
         inst = resp.get("instance") or {}
         instance_id = inst.get("id") or self.instance_id or ""
-        self.config.set("license_key", key_api)
-        self.config.set("license_activated", True)
-        self.config.set("license_instance_id", instance_id)
-        self.config.set("license_machine_fp", self._fp)
-        self.config.set("license_last_check", time.time())
-        self.config.set("license_meta", resp.get("meta") or {})
-        self.config.set("pro_unlocked", False)
+        self.config.update(
+            {
+                "license_key": key_api,
+                "license_activated": True,
+                "license_instance_id": instance_id,
+                "license_machine_fp": self._fp,
+                "license_last_check": time.time(),
+                "license_meta": resp.get("meta") or {},
+                "pro_unlocked": False,
+            }
+        )
         log.info("License activated instance_id=%s fp=%s…", instance_id, self._fp[:8])
         self.start_heartbeat()
         return True, note
@@ -476,12 +484,16 @@ class LicenseManager:
         return True, f"Local cleared. Server: {resp.get('error') or 'ok'}"
 
     def deactivate_local(self):
-        self.config.set("license_key", "")
-        self.config.set("license_activated", False)
-        self.config.set("license_instance_id", "")
-        self.config.set("license_machine_fp", "")
-        self.config.set("license_last_check", 0)
-        self.config.set("pro_unlocked", False)
+        self.config.update(
+            {
+                "license_key": "",
+                "license_activated": False,
+                "license_instance_id": "",
+                "license_machine_fp": "",
+                "license_last_check": 0,
+                "pro_unlocked": False,
+            }
+        )
 
     def deactivate(self):
         self.deactivate_local()

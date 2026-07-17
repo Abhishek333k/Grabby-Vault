@@ -3,7 +3,6 @@ import os
 import sys
 import threading
 
-# Ensure src/ is on path when launched as python src/main.py
 _SRC = os.path.dirname(os.path.abspath(__file__))
 if _SRC not in sys.path:
     sys.path.insert(0, _SRC)
@@ -24,7 +23,6 @@ def main():
     except OSError:
         pass
 
-    # Root exists first (required for CTkImage / Toplevel splash)
     ctk.set_appearance_mode("dark")
     root_holder = {"app": None, "tray": None}
 
@@ -34,10 +32,23 @@ def main():
 
         def on_app_quit():
             print("[App] Cleaning up and exiting...")
+            try:
+                lic = LicenseManager()
+                lic.stop_heartbeat()
+            except Exception:
+                pass
+            try:
+                if hasattr(app, "queue_manager"):
+                    app.queue_manager.shutdown()
+            except Exception:
+                pass
             tray = root_holder.get("tray")
             if tray:
                 tray.stop()
-            app.destroy()
+            try:
+                app.destroy()
+            except Exception:
+                pass
             sys.exit(0)
 
         def on_window_close():
@@ -49,17 +60,15 @@ def main():
         root_holder["tray"] = tray
         tray.run()
 
-        # Heartbeat already started in MainWindow; one immediate check
+        # Startup license check only — demote callback owned by MainWindow
         def bg_license():
             try:
                 lic = LicenseManager()
-                lic.set_demote_callback(
-                    lambda reason: app.after(0, lambda: app._on_license_demoted(reason))
-                )
                 if lic.license_key:
                     ok, msg = lic.revalidate_online(force_demote=True)
                     print(f"[License] startup revalidate: {ok} ({msg})")
                     app.after(0, app.refresh_license_ui)
+                # Heartbeat already started in MainWindow; ensure running
                 lic.start_heartbeat()
             except Exception as e:
                 print(f"[License] revalidate error: {e}")
@@ -71,7 +80,6 @@ def main():
     show_splash = cfg.get("show_splash", True)
 
     if show_splash:
-        # Temporary root for splash only
         bootstrap = ctk.CTk()
         bootstrap.withdraw()
         splash = SplashScreen(bootstrap, duration_ms=2000)

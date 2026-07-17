@@ -2,16 +2,15 @@
 setlocal
 cd /d "%~dp0"
 
-if exist ".venv\Scripts\activate.bat" (
-  call ".venv\Scripts\activate.bat"
-) else if exist "venv\Scripts\activate.bat" (
+if exist "venv\Scripts\activate.bat" (
   call "venv\Scripts\activate.bat"
+) else if exist ".venv\Scripts\activate.bat" (
+  call ".venv\Scripts\activate.bat"
 )
 
 echo Installing dependencies...
 pip install -r requirements.txt
 pip install pyinstaller
-python -m playwright install chromium
 
 echo.
 echo Building GrabbyVault.exe (one-folder)...
@@ -29,9 +28,13 @@ pyinstaller --noconfirm --clean ^
   src\main.py
 
 echo.
-echo Copying config template and bin if present...
+echo Staging release folder (sanitized config)...
 if not exist "dist\GrabbyVault" mkdir "dist\GrabbyVault"
-copy /Y config.json "dist\GrabbyVault\config.json" >nul 2>&1
+if exist "config.example.json" (
+  copy /Y config.example.json "dist\GrabbyVault\config.json" >nul
+) else (
+  echo WARNING: config.example.json missing
+)
 if exist bin (
   xcopy /E /I /Y bin "dist\GrabbyVault\bin" >nul
 )
@@ -40,6 +43,7 @@ if exist assets (
 )
 
 echo.
-echo Done. Run: dist\GrabbyVault\GrabbyVault.exe
-echo Remember: place ffmpeg.exe + ffprobe.exe in dist\GrabbyVault\bin\
+echo Done: dist\GrabbyVault\GrabbyVault.exe
+echo Ensure bin\ffmpeg.exe and ffprobe.exe are present for merges.
+echo Release config has allow_dev_keys=false — use a real Lemon Squeezy key.
 pause

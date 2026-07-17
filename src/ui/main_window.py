@@ -39,12 +39,16 @@ class MainWindow(ctk.CTk):
         # Frameless window
         self.overrideredirect(True)
         
-        # Apply true glass blur behind the window
-        if pywinstyles:
-            pywinstyles.apply_style(self, "acrylic")
-            
-        # Set window opacity so the acrylic blur shines through
-        self.attributes("-alpha", 0.88)
+        cfg = ConfigManager()
+        use_acrylic = cfg.get("use_acrylic", True) is not False
+        if use_acrylic and pywinstyles:
+            try:
+                pywinstyles.apply_style(self, "acrylic")
+                self.attributes("-alpha", 0.88)
+            except Exception:
+                self.attributes("-alpha", 1.0)
+        else:
+            self.attributes("-alpha", 1.0)
         
         # Set up cyberpunk dark theme
         apply_cyberpunk_theme(self)
@@ -65,7 +69,7 @@ class MainWindow(ctk.CTk):
         self.queue_manager = QueueManager(ui_callbacks={
             'on_start': self._on_download_start,
             'on_progress': self._on_download_progress,
-            'on_finish': self._on_download_finish,
+            'on_finish': self._on_download_finish,  # (job_id, filepath|None)
             'on_error': self._on_download_error
         })
         
@@ -92,18 +96,26 @@ class MainWindow(ctk.CTk):
 
     def _load_persistent_jobs(self):
         for job_id, job in self.queue_manager.jobs.items():
-            if job['status'] not in ('finished', 'cancelled'):
-                title = job['metadata'].get('title', 'Unknown Video')
-                platform = job.get('platform', 'Unknown')
-                self._add_queue_item(job_id, f"{title} (Restored)", platform)
-                # Set initial status
-                status = job['status']
-                card = self.queue_cards[job_id]
-                if status == 'paused':
-                    card['lbl_status'].configure(text="Paused", text_color=TEXT_MUTED)
-                    card['btn_pause'].configure(text="▶", text_color=NEON_GREEN)
-                elif status == 'error':
-                    card['lbl_status'].configure(text="Error", text_color=NEON_RED)
+            if job["status"] in ("finished", "cancelled"):
+                continue
+            title = (job.get("metadata") or {}).get("title", "Unknown Video")
+            platform = job.get("platform", "Unknown")
+            self._add_queue_item(job_id, f"{title} (Restored)", platform)
+            status = job["status"]
+            card = self.queue_cards[job_id]
+            if status == "paused":
+                card["lbl_status"].configure(text="Paused", text_color=TEXT_MUTED)
+                card["btn_pause"].configure(text="▶", text_color=NEON_GREEN)
+            elif status == "error":
+                err = (job.get("error") or "Error")[:40]
+                card["lbl_status"].configure(
+                    text=f"Error: {err}", text_color=NEON_RED
+                )
+                card["btn_pause"].configure(
+                    text="↻",
+                    text_color=NEON_BLUE,
+                    command=lambda j=job_id: self._handle_retry(j),
+                )
                     
     def _enable_taskbar_integration(self):
         """
@@ -344,6 +356,20 @@ class MainWindow(ctk.CTk):
         )
         self.search_input.pack(side="left", padx=20)
         
+        self.btn_clear_done = ctk.CTkButton(
+            header_frame,
+            text="Clear done",
+            width=90,
+            height=28,
+            fg_color="transparent",
+            border_width=1,
+            border_color=BORDER_MUTED,
+            text_color=TEXT_MUTED,
+            font=("Segoe UI", 11),
+            command=self._clear_finished_cards,
+        )
+        self.btn_clear_done.pack(side="right", padx=(8, 0))
+
         self.lbl_count = ctk.CTkLabel(
             header_frame, 
             text="0 Jobs", 
@@ -385,14 +411,15 @@ class MainWindow(ctk.CTk):
         )
         lbl_platform.pack(side="left", padx=(0, 8))
         
+        display = title if len(title) <= 72 else title[:69] + "…"
         lbl_title = ctk.CTkLabel(
             info_frame, 
-            text=title, 
+            text=display, 
             font=("Segoe UI", 12, "bold"), 
             text_color=TEXT_PRIMARY,
-            anchor="w"
+            anchor="w",
         )
-        lbl_title.pack(side="left")
+        lbl_title.pack(side="left", fill="x", expand=True)
         
         lbl_status = ctk.CTkLabel(
             info_frame, 
@@ -510,29 +537,61 @@ class MainWindow(ctk.CTk):
             card['pb'].set(1.0)
             self.status_right.configure(text=f"Speed: 0.0 MB/s")
 
-    def _on_download_finish(self, job_id):
-        self.ui_queue.put(('finish', job_id))
+    def _on_download_finish(self, job_id, filepath=None):
+        self.ui_queue.put(('finish', job_id, filepath))
 
-    def _update_ui_finish(self, job_id):
+    def _update_ui_finish(self, job_id, filepath=None):
         if job_id in self.queue_cards:
             card = self.queue_cards[job_id]
             card['lbl_status'].configure(text="Completed", text_color=NEON_GREEN)
             card['pb'].set(1.0)
             card['pb'].configure(progress_color=NEON_GREEN)
-            card['btn_action'].configure(state="normal", text="🗑", text_color=TEXT_MUTED, command=lambda j=job_id: self._handle_remove(j))
-            # Enable locate button if we add one later
-            if 'btn_locate' in card:
+            card['btn_action'].configure(
+                state="normal", text="🗑", text_color=TEXT_MUTED,
+                command=lambda j=job_id: self._handle_remove(j),
+            )
+            # Resolve filepath from arg, job memory, or DB
+            job = self.queue_manager.jobs.get(job_id) or {}
+            fp = filepath or job.get("filepath")
+            if not fp:
+                row = self.queue_manager.db.get_job(job_id)
+                fp = (row or {}).get("filepath")
+            card["filepath"] = fp
+
+            if "btn_locate" in card:
                 import subprocess
-                def open_folder():
-                    job_data = self.queue_manager.db.get_job(job_id)
-                    filepath = job_data.get('filepath') if job_data else None
-                    if filepath and os.path.exists(filepath):
-                        # Use explorer /select to highlight the file
-                        subprocess.Popen(f'explorer /select,"{os.path.normpath(filepath)}"')
-                    elif filepath and os.path.exists(os.path.dirname(filepath)):
-                        os.startfile(os.path.dirname(filepath))
-                card['btn_locate'].configure(command=open_folder)
-                card['btn_locate'].pack(side="right", padx=5)
+
+                def open_folder(j=job_id):
+                    path = (self.queue_cards.get(j) or {}).get("filepath")
+                    if not path:
+                        row = self.queue_manager.db.get_job(j)
+                        path = (row or {}).get("filepath")
+                    if not path:
+                        # Fallback: open downloads folder
+                        path = ConfigManager().get_download_path()
+                        if os.path.isdir(path):
+                            os.startfile(path)
+                        return
+                    path = os.path.normpath(path)
+                    if os.path.isfile(path):
+                        subprocess.Popen(
+                            ["explorer", "/select,", path], shell=False
+                        )
+                    elif os.path.isdir(os.path.dirname(path)):
+                        os.startfile(os.path.dirname(path))
+                    else:
+                        dl = ConfigManager().get_download_path()
+                        if os.path.isdir(dl):
+                            os.startfile(dl)
+
+                card["btn_locate"].configure(command=open_folder)
+                card["btn_locate"].pack(side="right", padx=5)
+
+            if ConfigManager().get("open_folder_on_complete"):
+                try:
+                    card["btn_locate"].cget("command")()
+                except Exception:
+                    pass
 
     def _on_download_error(self, job_id, error_msg):
         self.ui_queue.put(('error', job_id, error_msg))
@@ -547,11 +606,20 @@ class MainWindow(ctk.CTk):
             elif error_msg == "Paused":
                 card['lbl_status'].configure(text="Paused", text_color=TEXT_MUTED)
                 card['pb'].configure(progress_color=TEXT_MUTED)
+                card['btn_pause'].configure(text="▶", text_color=NEON_GREEN)
             else:
                 short_error = error_msg.split('\n')[0][:50]
                 card['lbl_status'].configure(text=f"Error: {short_error}...", text_color=NEON_RED)
                 card['pb'].configure(progress_color=NEON_RED)
-                card['btn_action'].configure(state="normal", text="🗑", text_color=TEXT_MUTED, command=lambda j=job_id: self._handle_remove(j))
+                card['btn_action'].configure(
+                    state="normal", text="🗑", text_color=TEXT_MUTED,
+                    command=lambda j=job_id: self._handle_remove(j),
+                )
+                # Retry on pause button when error
+                card['btn_pause'].configure(
+                    text="↻", text_color=NEON_BLUE,
+                    command=lambda j=job_id: self._handle_retry(j),
+                )
 
     def _process_ui_events(self):
         try:
@@ -563,7 +631,8 @@ class MainWindow(ctk.CTk):
                 elif msg_type == 'progress':
                     self._update_ui_progress(event[1], event[2])
                 elif msg_type == 'finish':
-                    self._update_ui_finish(event[1])
+                    fp = event[2] if len(event) > 2 else None
+                    self._update_ui_finish(event[1], fp)
                 elif msg_type == 'error':
                     self._update_ui_error(event[1], event[2])
                 self.ui_queue.task_done()
@@ -637,20 +706,47 @@ class MainWindow(ctk.CTk):
                 card_data['card'].pack_forget()
 
     def _handle_pause_resume(self, job_id):
-        if job_id not in self.queue_cards: return
+        if job_id not in self.queue_cards:
+            return
         card = self.queue_cards[job_id]
-        
-        btn = card['btn_pause']
-        if btn.cget("text") == "⏸":
+        btn = card["btn_pause"]
+        label = btn.cget("text")
+        if label == "⏸":
             print(f"[UI] Pausing job: {job_id}")
             self.queue_manager.pause_job(job_id)
             btn.configure(text="▶", text_color=NEON_GREEN)
-            card['lbl_status'].configure(text="Pausing...", text_color=TEXT_MUTED)
+            card["lbl_status"].configure(text="Pausing…", text_color=TEXT_MUTED)
         else:
             print(f"[UI] Resuming job: {job_id}")
             self.queue_manager.resume_job(job_id)
             btn.configure(text="⏸", text_color=NEON_BLUE)
-            card['lbl_status'].configure(text="Queued", text_color=NEON_PURPLE)
+            card["lbl_status"].configure(text="Queued", text_color=NEON_PURPLE)
+
+    def _handle_retry(self, job_id):
+        if job_id not in self.queue_cards:
+            return
+        card = self.queue_cards[job_id]
+        self.queue_manager.retry_job(job_id)
+        card["btn_pause"].configure(
+            text="⏸",
+            text_color=NEON_BLUE,
+            command=lambda j=job_id: self._handle_pause_resume(j),
+        )
+        card["lbl_status"].configure(text="Queued", text_color=NEON_PURPLE)
+        card["pb"].set(0)
+        card["pb"].configure(progress_color=NEON_BLUE)
+
+    def _clear_finished_cards(self):
+        to_remove = []
+        for job_id, job in list(self.queue_manager.jobs.items()):
+            if job.get("status") in ("finished", "cancelled"):
+                to_remove.append(job_id)
+        for job_id in to_remove:
+            self.queue_manager.delete_job(job_id)
+            if job_id in self.queue_cards:
+                self.queue_cards[job_id]["card"].destroy()
+                del self.queue_cards[job_id]
+        self._update_job_count()
 
     # Drag Handlers (Smooth Screen-Relative Logic)
     def _start_drag(self, event):
@@ -714,89 +810,110 @@ class MainWindow(ctk.CTk):
 
     def _handle_add_to_queue(self):
         url = self.url_input.get().strip()
-        if url:
-            print(f"[UI] Adding link to download queue: {url}")
-            self.url_input.delete(0, 'end')
-            
-            # Show a temporary fetching state
-            self.status_left.configure(text="FETCHING METADATA...")
-            
-            def info_callback(success, data):
-                def update_ui():
-                    if success:
-                        self.status_left.configure(text="SYSTEM READY // NET_CONNECTED")
-                        _type = data.get('_type', 'video')
-                        platform = URLRouter.get_platform(url)
-                        p_map = {"High": 0, "Normal": 1, "Low": 2}
-                        pri = p_map.get(self.priority_var.get(), 1)
-                        
-                        if _type == 'playlist':
-                            entries = data.get('entries', [])
-                            is_playwright = data.get('extractor') == 'playwright'
-                            
-                            def on_playlist_submit(selected_entries):
-                                if not selected_entries: return
-                                
-                                def queue_selected(fmt_str):
-                                    playlist_title = data.get('title', 'Playlist')
-                                    for entry in selected_entries:
-                                        entry_url = entry.get('url', entry.get('webpage_url', ''))
-                                        if not entry_url: continue
-                                        title = entry.get('title', 'Unknown Video')
-                                        job_id = str(uuid.uuid4())
-                                        thumb = entry.get('thumbnail', '')
-                                        
-                                        # Always use the chosen quality preset (even for Playwright
-                                        # direct streams / m3u8). Old code forced 'best', which often
-                                        # grabbed the lowest HLS rung → pixelated / silent files.
-                                        final_fmt = fmt_str
-                                        
-                                        entry['id'] = job_id
-                                        # Inject playlist_title for folder grouping
-                                        entry['playlist_title'] = playlist_title
-                                        
-                                        self._add_queue_item(job_id, f"{title} [{entry.get('ext', 'unknown')}]", platform, thumbnail_url=thumb)
-                                        _jid, warning = self.queue_manager.add_job(
-                                            entry_url, entry, priority=pri,
-                                            format_str=final_fmt, platform=platform,
-                                        )
-                                        if warning:
-                                            self.status_left.configure(text=warning[:80])
-                                        
-                                # Always ask quality — applies to Playwright streams too
-                                FormatSelectionDialog(
-                                    self,
-                                    title=f"Format for Playlist ({len(selected_entries)} items)",
-                                    on_submit=queue_selected,
-                                )
-                                
-                            dialog_title = "Select Alternative Streams" if is_playwright else "Select Videos"
-                            PlaylistSelectionDialog(self, entries, on_submit=on_playlist_submit)
-                        else:
-                            def on_format_submit(fmt_str):
-                                title = data.get('title', 'Unknown Video')
-                                job_id = str(uuid.uuid4())
-                                thumb = data.get('thumbnail')
-                                self._add_queue_item(job_id, f"{title} [{data.get('ext', 'unknown')}]", platform, thumbnail_url=thumb)
-                                
-                                meta = data.copy()
-                                meta['id'] = job_id
-                                _jid, warning = self.queue_manager.add_job(
-                                    url, meta, priority=pri,
-                                    format_str=fmt_str, platform=platform,
-                                )
-                                if warning:
-                                    self.status_left.configure(text=warning[:80])
-                            FormatSelectionDialog(self, title="Format for Video", on_submit=on_format_submit)
-                    else:
-                        print(f"[UI] Failed to fetch info: {data}")
-                        short_error = data.split('\n')[0][:60]
-                        self.status_left.configure(text=f"ERROR: {short_error.upper()}...")
-                self.after(0, update_ui)
+        if not url:
+            self.status_left.configure(text="Paste a video URL first")
+            return
+        if not (url.startswith("http://") or url.startswith("https://")):
+            self.status_left.configure(text="URL must start with http:// or https://")
+            return
 
-            def status_cb(msg):
-                self.after(0, lambda: self.status_left.configure(text=msg.upper()))
-                
-            self.queue_manager.fetch_info_async(url, info_callback, status_callback=status_cb)
-        else:
-            print("[UI] Add to Queue clicked, but URL field is empty.")
+        print(f"[UI] Adding link to download queue: {url}")
+        self.url_input.delete(0, "end")
+        self.status_left.configure(text="FETCHING METADATA...")
+
+        def info_callback(success, data):
+            def update_ui():
+                if success:
+                    self.status_left.configure(text="Ready")
+                    _type = data.get("_type", "video")
+                    platform = URLRouter.get_platform(url)
+                    p_map = {"High": 0, "Normal": 1, "Low": 2}
+                    pri = p_map.get(self.priority_var.get(), 1)
+
+                    if _type == "playlist":
+                        entries = data.get("entries", []) or []
+                        # Drop empty flat entries
+                        entries = [e for e in entries if e]
+
+                        def on_playlist_submit(selected_entries):
+                            if not selected_entries:
+                                return
+
+                            def queue_selected(fmt_str):
+                                playlist_title = data.get("title", "Playlist")
+                                for entry in selected_entries:
+                                    entry_url = entry.get(
+                                        "url", entry.get("webpage_url", "")
+                                    )
+                                    if not entry_url:
+                                        continue
+                                    title = entry.get("title", "Unknown Video")
+                                    job_id = str(uuid.uuid4())
+                                    thumb = entry.get("thumbnail", "")
+                                    entry = dict(entry)
+                                    entry["id"] = job_id
+                                    entry["playlist_title"] = playlist_title
+                                    self._add_queue_item(
+                                        job_id,
+                                        f"{title} [{entry.get('ext', 'unknown')}]",
+                                        platform,
+                                        thumbnail_url=thumb,
+                                    )
+                                    _jid, warning = self.queue_manager.add_job(
+                                        entry_url,
+                                        entry,
+                                        priority=pri,
+                                        format_str=fmt_str,
+                                        platform=platform,
+                                    )
+                                    if warning:
+                                        self.status_left.configure(text=warning[:80])
+
+                            FormatSelectionDialog(
+                                self,
+                                title=f"Format for Playlist ({len(selected_entries)} items)",
+                                on_submit=queue_selected,
+                            )
+
+                        PlaylistSelectionDialog(
+                            self, entries, on_submit=on_playlist_submit
+                        )
+                    else:
+                        def on_format_submit(fmt_str):
+                            title = data.get("title", "Unknown Video")
+                            job_id = str(uuid.uuid4())
+                            thumb = data.get("thumbnail")
+                            self._add_queue_item(
+                                job_id,
+                                f"{title} [{data.get('ext', 'unknown')}]",
+                                platform,
+                                thumbnail_url=thumb,
+                            )
+                            meta = data.copy()
+                            meta["id"] = job_id
+                            _jid, warning = self.queue_manager.add_job(
+                                url,
+                                meta,
+                                priority=pri,
+                                format_str=fmt_str,
+                                platform=platform,
+                            )
+                            if warning:
+                                self.status_left.configure(text=warning[:80])
+
+                        FormatSelectionDialog(
+                            self, title="Format for Video", on_submit=on_format_submit
+                        )
+                else:
+                    print(f"[UI] Failed to fetch info: {data}")
+                    short_error = str(data).split("\n")[0][:70]
+                    self.status_left.configure(text=f"Error: {short_error}")
+
+            self.after(0, update_ui)
+
+        def status_cb(msg):
+            self.after(0, lambda m=msg: self.status_left.configure(text=m))
+
+        self.queue_manager.fetch_info_async(
+            url, info_callback, status_callback=status_cb
+        )
