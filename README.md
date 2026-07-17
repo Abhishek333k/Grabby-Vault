@@ -76,8 +76,3 @@ config.json          portable settings
 
 Only download content you have the right to access. Respect site terms of service. GrabbyVault is a personal utility tool.
 
-## Money flow (your ops)
-
-1. Sell Pro via Lemon Squeezy  
-2. Optional Donate product  
-3. Payout → bank → transfer to FD / separate savings (manual)
